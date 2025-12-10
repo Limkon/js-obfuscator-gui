@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JS 专业代码混淆器 Pro</title>
+    <style>
+        :root { --primary: #8ccf98; --primary-dark: #6eb57a; --bg: #ffffff; --border: #e1e4e8; --text: #555; --text-active: #4a8a56; }
+        body { font-family: 'Segoe UI', sans-serif; padding: 20px; background-color: #f9f9f9; color: var(--text); user-select: none; margin: 0; }
+        
+        /* 顶部 Tab 容器 */
+        .tab-container { background: white; border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        
+        /* Tab 头部 */
+        .tab-header { display: flex; border-bottom: 1px solid var(--border); background: #fcfcfc; }
+        .tab-item { flex: 1; text-align: center; padding: 15px 0; cursor: pointer; color: #888; border-right: 1px solid var(--border); font-size: 14px; transition: 0.2s; }
+        .tab-item:last-child { border-right: none; }
+        .tab-item:hover { background: #fdfdfd; color: var(--text-active); }
+        .tab-item.active { background: white; color: var(--text-active); font-weight: bold; border-top: 3px solid var(--primary-dark); border-bottom: 1px solid white; margin-bottom: -1px; }
+
+        /* 内容区域 */
+        .tab-content { padding: 0; display: none; height: 300px; position: relative; }
+        .tab-content.active { display: block; }
+
+        /* 大文本框 */
+        textarea.code-area { width: 100%; height: 100%; border: none; padding: 15px; box-sizing: border-box; resize: none; font-family: 'Consolas', monospace; font-size: 13px; color: #333; outline: none; line-height: 1.5; }
+        textarea.code-area:focus { background: #fafafa; }
+
+        /* 文件选择模式样式 */
+        .file-mode-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #999; }
+        .file-display { margin-top: 15px; font-weight: bold; color: #333; display: none; word-break: break-all; padding: 0 20px; text-align: center;}
+        #btn-select-file { padding: 10px 25px; background: white; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: 0.2s; }
+        #btn-select-file:hover { border-color: var(--primary); color: var(--primary-dark); }
+
+        /* 底部操作栏 */
+        .action-bar { padding: 10px 15px; border-top: 1px solid var(--border); background: white; display: flex; align-items: center; }
+        #btn-run { background: #a2dcae; color: white; border: none; padding: 8px 25px; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        #btn-run:hover { background: var(--primary-dark); }
+        #btn-run:disabled { background: #ddd; cursor: not-allowed; }
+        #status-msg { margin-left: 15px; font-size: 13px; color: #666; font-weight: bold; }
+
+        /* --- 下方配置区 --- */
+        .config-title { font-size: 18px; color: #333; margin: 30px 0 15px 0; border-left: 4px solid var(--primary); padding-left: 10px; }
+        .config-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; transition: 0.3s; }
+        
+        .panel { background: white; padding: 15px; border-radius: 4px; border: 1px solid var(--border); }
+        h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 8px; font-size: 14px; color: #333; margin-bottom: 12px; }
+        
+        .form-item { margin-bottom: 8px; display: flex; align-items: center; font-size: 12px; color: #666; }
+        .form-item label { margin-left: 6px; cursor: pointer; }
+        .sub-item { margin-left: 22px; margin-bottom: 10px; }
+        .input-full, select, textarea.config-text { width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box; }
+        textarea.config-text { height: 40px; resize: vertical; font-family: monospace; }
+        .help-text { color: #999; font-size: 11px; margin-bottom: 2px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="tab-container">
+        <div class="tab-header">
+            <div id="tab-item-paste" class="tab-item active" data-tab="tab-paste">粘贴JavaScript代码</div>
+            <div id="tab-item-file" class="tab-item" data-tab="tab-file">选择JavaScript文件</div>
+            <div id="tab-item-result" class="tab-item" data-tab="tab-result">加密结果</div>
+        </div>
+
+        <div id="tab-paste" class="tab-content active">
+            <textarea id="rawCodeInput" class="code-area" placeholder="// 在此处粘贴您的 JavaScript 源代码..."></textarea>
+        </div>
+
+        <div id="tab-file" class="tab-content">
+            <div class="file-mode-container">
+                <button id="btn-select-file">点击选择 JS 文件</button>
+                <div id="file-path-display" class="file-display"></div>
+                <div style="margin-top:5px; font-size:12px; color:#aaa;">混淆后的文件将自动保存在源文件同目录下</div>
+            </div>
+        </div>
+
+        <div id="tab-result" class="tab-content">
+            <textarea id="resultOutput" class="code-area" readonly placeholder="点击“混淆加密”后，结果将显示在这里..."></textarea>
+        </div>
+
+        <div class="action-bar">
+            <button id="btn-run">混淆加密</button>
+            <span id="status-msg"></span>
+        </div>
+    </div>
+
+    <div class="config-title">高级参数配置</div>
+
+    <div class="config-grid" id="configPanel">
+        <div class="panel">
+            <h3>混淆选项预设</h3>
+            <div class="form-item"><input type="radio" name="preset" value="default" checked id="pre_default"><label for="pre_default">默认 (高性能)</label></div>
+            <div class="form-item"><input type="radio" name="preset" value="low" id="pre_low"><label for="pre_low">低混淆 (高性能)</label></div>
+            <div class="form-item"><input type="radio" name="preset" value="medium" id="pre_medium"><label for="pre_medium">中等混淆 (均衡)</label></div>
+            <div class="form-item"><input type="radio" name="preset" value="high" id="pre_high"><label for="pre_high">高混淆 (低性能)</label></div>
+        </div>
+
+        <div class="panel">
+            <h3>基础设置</h3>
+            <div class="form-item"><input type="checkbox" id="compact" checked><label for="compact">紧凑代码 (Compact)</label></div>
+            <div class="form-item"><input type="checkbox" id="selfDefending"><label for="selfDefending">自我保护 (防格式化)</label></div>
+            <div class="form-item"><input type="checkbox" id="debugProtection"><label for="debugProtection">禁止控制台调试</label></div>
+            <div class="form-item"><input type="checkbox" id="disableConsoleOutput"><label for="disableConsoleOutput">禁止Console输出</label></div>
+            <div class="form-item"><input type="checkbox" id="numbersToExpressions"><label for="numbersToExpressions">数值转表达式</label></div>
+            <div class="form-item"><input type="checkbox" id="simplify" checked><label for="simplify">优化代码结构</label></div>
+            <div class="form-item"><input type="checkbox" id="splitStrings"><label for="splitStrings">分割字符串</label></div>
+            <div class="form-item"><input type="checkbox" id="unicodeEscapeSequence"><label for="unicodeEscapeSequence">Unicode 转义</label></div>
+            <div class="form-item"><input type="checkbox" id="renameGlobals"><label for="renameGlobals">重命名全局变量</label></div>
+        </div>
+
+        <div class="panel">
+            <h3>加密系数</h3>
+            <div class="form-item"><input type="checkbox" id="deadCodeInjection"><label for="deadCodeInjection">注入死代码</label></div>
+            <div class="sub-item">
+                <input type="number" id="deadCodeInjectionThreshold" class="input-full" value="0.4" step="0.1" max="1" min="0">
+            </div>
+            
+            <div class="form-item"><input type="checkbox" id="controlFlowFlattening"><label for="controlFlowFlattening">控制流平坦化</label></div>
+            <div class="sub-item">
+                <input type="number" id="controlFlowFlatteningThreshold" class="input-full" value="0.75" step="0.1" max="1" min="0">
+            </div>
+
+            <div class="sub-item" style="margin-left:0; margin-top:10px">
+                <div class="help-text">标识符生成器:</div>
+                <select id="identifierNamesGenerator">
+                    <option value="hexadecimal">hexadecimal (16进制)</option>
+                    <option value="mangled">mangled (简短字符)</option>
+                    <option value="mangled-shuffled">mangled-shuffled</option>
+                    <option value="dictionary">dictionary (字典)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>高级设置</h3>
+            <div class="help-text">域名锁定 (每行一个):</div>
+            <textarea id="domainLock" class="config-text" placeholder="example.com"></textarea>
+            
+            <div class="help-text">重定向 URL:</div>
+            <input type="text" id="domainLockRedirectUrl" class="input-full" placeholder="about:blank">
+            
+            <div class="help-text" style="margin-top:5px">保留字符串 (每行一个):</div>
+            <textarea id="reservedStrings" class="config-text" placeholder="react&#10;vue"></textarea>
+            
+            <div class="help-text" style="margin-top:5px">保留变量名 (每行一个):</div>
+            <textarea id="reservedNames" class="config-text" placeholder="jQuery&#10;$"></textarea>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
