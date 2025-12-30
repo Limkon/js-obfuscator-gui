@@ -102,7 +102,11 @@
             <h3>运行环境 (Target)</h3>
             <div class="form-item"><input type="radio" name="target" value="browser" checked id="target_browser"><label for="target_browser">Browser (浏览器)</label></div>
             <div class="form-item"><input type="radio" name="target" value="browser-no-eval" id="target_browser_no_eval"><label for="target_browser_no_eval">Browser (无 Eval)</label></div>
-            <div class="form-item"><input type="radio" name="target" value="node" id="target_node"><label for="target_node">Node.js (服务端/Windows)</label></div>
+            <div class="form-item"><input type="radio" name="target" value="node" id="target_node"><label for="target_node">Node.js (通用)</label></div>
+            <div class="form-item" style="color: #2c7c38; font-weight: bold;">
+                <input type="radio" name="target" value="node-pure" id="target_node_pure">
+                <label for="target_node_pure">Node.js (纯净 - 无Window)</label>
+            </div>
         </div>
 
         <div class="panel">
