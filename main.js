@@ -5,12 +5,10 @@ const JavaScriptObfuscator = require('javascript-obfuscator');
 
 let mainWindow;
 
-// --- 菜单配置 ---
 const createMenu = () => {
     Menu.setApplicationMenu(null); 
 };
 
-// --- 创建窗口 ---
 function createWindow() {
     createMenu();
     mainWindow = new BrowserWindow({
@@ -32,8 +30,6 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
-// --- IPC 通信逻辑 ---
-
 ipcMain.handle('dialog:openFile', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
         properties: ['openFile'],
@@ -50,7 +46,6 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         let code = '';
         let inputPath = null;
 
-        // A. 读取代码
         if (type === 'paste') {
             if (!content || typeof content !== 'string' || !content.trim()) {
                 throw new Error("代码内容为空");
@@ -70,38 +65,49 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         let config = {
             ...options,
             stringArray: true,
-            stringArrayEncoding: ['rc4'],
+            stringArrayEncoding: ['rc4'], // 默认使用强加密
             ignoreRequireImports: true
         };
         
-        // --- [核心修复] 针对 Node.js 纯净模式的强力清洗 ---
+        // --- [核心修复] Node.js 纯净模式：核弹级清理 ---
         if (config.target === 'node-pure') {
-            console.log("启动 Node.js 纯净模式：强制移除所有浏览器依赖...");
-            
-            // 1. 修正 target 为标准的 'node'
+            console.log(">>> 启动 Node.js 纯净模式 <<<");
+            console.log("正在移除所有可能导致 window 报错的选项...");
+
+            // 1. 修正 target
             config.target = 'node';
             
-            // 2. 强制清空域名锁定
+            // 2. 彻底删除域名锁定 (window报错的主因)
             delete config.domainLock;
             delete config.domainLockRedirectUrl;
             
-            // 3. 强制关闭调试保护
+            // 3. 彻底删除调试保护 (数字校验报错的主因)
             config.debugProtection = false;
-            
-            // [修复点]: 这里不能设为 false，必须直接删除该 key，否则校验器会报 "must be a number" 错误
             delete config.debugProtectionInterval; 
+            
+            // 4. [新增] 强制关闭自我保护 (Node环境下极易导致死循环或报错)
+            config.selfDefending = false;
+
+            // 5. [新增] 降级字符串加密 (RC4算法有时会生成依赖环境的代码，降级为base64更安全)
+            config.stringArrayEncoding = ['base64'];
+            
+            // 6. [新增] 关闭字符串分割 (减少生成的辅助代码量)
+            config.splitStrings = false;
         } 
         else if (config.target === 'node') {
-             // 普通 Node 模式清理
+             // 普通 Node 模式也建议清理域名锁定
              delete config.domainLock;
              delete config.domainLockRedirectUrl;
         }
 
-        // 清理空配置
+        // 常规清理：删除空数组配置
         if (config.domainLock && config.domainLock.length === 0) delete config.domainLock;
         if (config.reservedStrings && config.reservedStrings.length === 0) delete config.reservedStrings;
         if (config.reservedNames && config.reservedNames.length === 0) delete config.reservedNames;
         if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
+
+        // 打印最终配置 (调试用)
+        // console.log("Final Config:", JSON.stringify(config, null, 2));
 
         // C. 执行混淆
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
