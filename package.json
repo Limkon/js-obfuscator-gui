@@ -1,5 +1,6 @@
 {
   "name": "js-obfuscator-gui",
+  "productName": "Obfuscator-GUI",
   "version": "1.0.0",
   "description": "Local JS Obfuscator",
   "main": "main.js",
@@ -10,8 +11,10 @@
   },
   "build": {
     "appId": "com.local.obfuscator",
+    "productName": "Obfuscator-GUI",
+    "artifactName": "${productName}.${ext}",
     "win": {
-      "target": "portable", 
+      "target": "portable",
       "icon": "icon.ico"
     },
     "directories": {
