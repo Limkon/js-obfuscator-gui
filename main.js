@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// ★★★ 版本号：FINAL_VERIFICATION_V6 ★★★
-const CURRENT_VERSION = "FINAL_VERIFICATION_V6"; 
+// ★★★ 版本号：CF_WORKER_PATCH_V7 ★★★
+const CURRENT_VERSION = "CF_WORKER_PATCH_V7"; 
 
 let mainWindow;
 
@@ -62,35 +62,30 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         // --- 1. 配置处理逻辑 ---
         let finalConfig = { ...options, ignoreRequireImports: true };
 
-        // --- 2. 根据环境强制清洗 ---
+        // --- 2. 强制清洗逻辑 ---
         if (finalConfig.target === 'node-pure') {
-            // >>> 纯净模式：强制关闭所有可能报错的项 <<<
-            console.log(">>> [纯净模式] 强制关闭 stringArray 和环境依赖");
-            finalConfig.target = 'node';
+            console.log(">>> [纯净模式] 强制关闭 StringArray，并准备注入 Worker 补丁");
+            finalConfig.target = 'node'; // 保持 node 目标以避免 excessive DOM code
             
-            // 【绝杀】强制关闭字符串数组，根除 sha224Hash
+            // 强制关闭导致报错的加密项
             finalConfig.stringArray = false; 
             finalConfig.stringArrayEncoding = [];
             
-            // 关闭其他浏览器依赖
+            // 关闭其他
             finalConfig.debugProtection = false;
             finalConfig.selfDefending = false;
             finalConfig.splitStrings = false; 
             
-            // 物理删除校验报错项
             finalConfig.domainLock = [];
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
         } 
         else if (finalConfig.target === 'node') {
-            // >>> 通用 Node 模式：仅清理校验不兼容字段 <<<
-            console.log(">>> [通用 Node 模式] 仅清理校验字段");
             delete finalConfig.domainLock;
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
         }
         else {
-            // >>> 浏览器模式 <<<
             if (!finalConfig.domainLockRedirectUrl) delete finalConfig.domainLockRedirectUrl;
         }
 
@@ -98,17 +93,26 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, finalConfig);
         let obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // --- 4. [关键] 注入时间戳头信息 ---
-        // 这行注释可以帮您确认：您运行的代码到底是新生成的，还是旧的缓存文件
+        // --- 4. [核心修复] 注入 Cloudflare Worker 兼容补丁 ---
+        // 这段代码会在混淆代码运行前执行，手动定义 window 对象，防止报错
         const timeStr = new Date().toLocaleTimeString();
-        const headerInfo = `/* Build Time: ${timeStr} | Target: ${finalConfig.target} | StringArray: ${finalConfig.stringArray} */\n`;
-        obfuscatedCode = headerInfo + obfuscatedCode;
+        
+        const cfWorkerPatch = `
+/* [Patch V7] Cloudflare Worker Compatibility Header - Built at ${timeStr} */
+/* 作用：防止混淆器生成的代码因访问 window 而崩溃 */
+var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
+var document = typeof document !== "undefined" ? document : { createElement: function(){ return { appendChild: function(){}, getContext: function(){} } } };
+/* End Patch */
 
-        // --- 5. 返回结果 (包含最终配置供调试) ---
+`;
+        // 将补丁拼接到代码最前面
+        obfuscatedCode = cfWorkerPatch + obfuscatedCode;
+
+        // --- 5. 返回结果 ---
         const response = { 
             success: true, 
             code: obfuscatedCode,
-            finalConfig: finalConfig // 将实际使用的配置发回给前端显示
+            finalConfig: finalConfig 
         };
 
         if (type === 'file') {
