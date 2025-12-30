@@ -1,0 +1,66 @@
+name: Build Windows Exe
+
+# 修改点：仅保留手动触发
+on:
+  workflow_dispatch:
+
+jobs:
+  # ==========================================
+  # 阶段 1: 下载与准备
+  # ==========================================
+  download-and-prepare:
+    name: 📥 Download & Install Deps
+    runs-on: windows-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Cache node_modules
+        id: cache-node
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+
+      - name: Install Dependencies
+        if: steps.cache-node.outputs.cache-hit != 'true'
+        run: npm install
+
+  # ==========================================
+  # 阶段 2: 构建应用
+  # ==========================================
+  build-exe:
+    name: 📦 Build Exe
+    needs: download-and-prepare
+    runs-on: windows-latest
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Restore node_modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
+
+      - name: Rebuild Native Deps
+        run: npm install
+
+      - name: Run Build
+        run: npm run dist
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Obfuscator-GUI-Setup
+          path: dist/*.exe
