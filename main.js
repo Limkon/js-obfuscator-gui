@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// ★★★ 版本标识：FINAL_COMPAT_V2 ★★★
-const CURRENT_VERSION = "FINAL_COMPAT_V2"; 
+// 版本号：RESTORE_LOGGING_V5
+const CURRENT_VERSION = "RESTORE_LOGGING_V5"; 
 
 let mainWindow;
 
@@ -59,58 +59,63 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             code = fs.readFileSync(inputPath, 'utf8');
         }
 
-        // --- 配置初始化 ---
-        let config = { ...options, ignoreRequireImports: true };
+        // --- 配置处理逻辑 ---
+        
+        // 1. 复制配置
+        let finalConfig = { ...options, ignoreRequireImports: true };
 
-        // ★★★ 核心修改：只要是 Node 环境，统统强制清理 ★★★
-        // 不管选的是 'node' 还是 'node-pure'，都执行最严格的安全策略
-        if (config.target === 'node' || config.target === 'node-pure') {
-            console.log(">>> [Node兼容模式] 正在强制移除浏览器依赖...");
-            
-            // 1. 统一修正为 node
-            config.target = 'node';
-
-            // 2. [绝杀] 强制关闭字符串数组
-            // 只要关闭这个，sha224Hash 和 window 依赖就绝对不会生成
-            config.stringArray = false; 
-            config.stringArrayEncoding = [];
-            
-            // 3. 删除所有可能报错的校验项
-            delete config.domainLock;
-            delete config.domainLockRedirectUrl;
-            delete config.debugProtectionInterval;
-
-            // 4. 关闭其他风险项
-            config.debugProtection = false;
-            config.selfDefending = false;
-            config.splitStrings = false;
-            
-            console.log(">>> [安全策略生效] stringArray=false, 已移除所有环境依赖。");
+        // 2. 根据不同模式进行不同程度的清洗
+        if (finalConfig.target === 'node-pure') {
+            // >>> 纯净模式：强制关闭所有可能报错的项 <<<
+            console.log(">>> [纯净模式] 强制关闭 stringArray 和环境依赖");
+            finalConfig.target = 'node';
+            finalConfig.stringArray = false; // 绝杀
+            finalConfig.stringArrayEncoding = [];
+            finalConfig.debugProtection = false;
+            finalConfig.selfDefending = false;
+            finalConfig.domainLock = [];
+            delete finalConfig.domainLockRedirectUrl;
+            delete finalConfig.debugProtectionInterval;
         } 
+        else if (finalConfig.target === 'node') {
+            // >>> 通用 Node 模式：还原正常选项，仅修复校验错误 <<<
+            console.log(">>> [通用 Node 模式] 保留用户选项，仅清理不兼容字段");
+            
+            // 在通用模式下，我们允许 stringArray 为 true (如果用户选了)
+            // 但是必须清理 domainLock，因为 Node 不支持 domainLock，会导致 crash 或校验失败
+            delete finalConfig.domainLock;
+            delete finalConfig.domainLockRedirectUrl;
+            delete finalConfig.debugProtectionInterval;
+            
+            // 提示：如果用户开启了 RC4，在 Node 下可能会报错，但这是“通用模式”允许的行为
+        }
         else {
-            // 浏览器模式：如果用户没填URL，删除该key防止校验错误
-            if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
+            // >>> 浏览器模式 <<<
+            // 默认行为，仅清理空字段
+            if (!finalConfig.domainLockRedirectUrl) delete finalConfig.domainLockRedirectUrl;
         }
 
-        // 执行混淆
-        const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
+        // 3. 执行混淆
+        const obfuscationResult = JavaScriptObfuscator.obfuscate(code, finalConfig);
         const obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // 验证代码
-        if (obfuscatedCode.includes('sha224Hash')) {
-            console.error("!!! 警告：代码中仍包含 sha224Hash，请检查是否选择了 Browser 模式 !!!");
-        }
+        // 4. 返回结果 (包含最终配置供调试)
+        const response = { 
+            success: true, 
+            code: obfuscatedCode,
+            finalConfig: finalConfig // 将实际使用的配置发回给前端显示
+        };
 
-        if (type === 'paste') {
-            return { success: true, code: obfuscatedCode };
-        } else {
+        if (type === 'file') {
             const dir = path.dirname(inputPath);
             const ext = path.extname(inputPath);
             const name = path.basename(inputPath, ext);
             const outputPath = path.join(dir, `${name}_obfuscated${ext}`);
             fs.writeFileSync(outputPath, obfuscatedCode, 'utf8');
-            return { success: true, path: outputPath, code: obfuscatedCode };
+            response.path = outputPath;
         }
+
+        return response;
 
     } catch (error) {
         console.error("后端报错:", error);
