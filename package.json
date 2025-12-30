@@ -11,7 +11,7 @@
   "build": {
     "appId": "com.local.obfuscator",
     "win": {
-      "target": "nsis",
+      "target": "portable", 
       "icon": "icon.ico"
     },
     "directories": {
