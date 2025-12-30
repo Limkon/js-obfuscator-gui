@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// 版本号：RESTORE_LOGGING_V5
-const CURRENT_VERSION = "RESTORE_LOGGING_V5"; 
+// ★★★ 版本号：FINAL_VERIFICATION_V6 ★★★
+const CURRENT_VERSION = "FINAL_VERIFICATION_V6"; 
 
 let mainWindow;
 
@@ -59,47 +59,52 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             code = fs.readFileSync(inputPath, 'utf8');
         }
 
-        // --- 配置处理逻辑 ---
-        
-        // 1. 复制配置
+        // --- 1. 配置处理逻辑 ---
         let finalConfig = { ...options, ignoreRequireImports: true };
 
-        // 2. 根据不同模式进行不同程度的清洗
+        // --- 2. 根据环境强制清洗 ---
         if (finalConfig.target === 'node-pure') {
             // >>> 纯净模式：强制关闭所有可能报错的项 <<<
             console.log(">>> [纯净模式] 强制关闭 stringArray 和环境依赖");
             finalConfig.target = 'node';
-            finalConfig.stringArray = false; // 绝杀
+            
+            // 【绝杀】强制关闭字符串数组，根除 sha224Hash
+            finalConfig.stringArray = false; 
             finalConfig.stringArrayEncoding = [];
+            
+            // 关闭其他浏览器依赖
             finalConfig.debugProtection = false;
             finalConfig.selfDefending = false;
+            finalConfig.splitStrings = false; 
+            
+            // 物理删除校验报错项
             finalConfig.domainLock = [];
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
         } 
         else if (finalConfig.target === 'node') {
-            // >>> 通用 Node 模式：还原正常选项，仅修复校验错误 <<<
-            console.log(">>> [通用 Node 模式] 保留用户选项，仅清理不兼容字段");
-            
-            // 在通用模式下，我们允许 stringArray 为 true (如果用户选了)
-            // 但是必须清理 domainLock，因为 Node 不支持 domainLock，会导致 crash 或校验失败
+            // >>> 通用 Node 模式：仅清理校验不兼容字段 <<<
+            console.log(">>> [通用 Node 模式] 仅清理校验字段");
             delete finalConfig.domainLock;
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
-            
-            // 提示：如果用户开启了 RC4，在 Node 下可能会报错，但这是“通用模式”允许的行为
         }
         else {
             // >>> 浏览器模式 <<<
-            // 默认行为，仅清理空字段
             if (!finalConfig.domainLockRedirectUrl) delete finalConfig.domainLockRedirectUrl;
         }
 
-        // 3. 执行混淆
+        // --- 3. 执行混淆 ---
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, finalConfig);
-        const obfuscatedCode = obfuscationResult.getObfuscatedCode();
+        let obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // 4. 返回结果 (包含最终配置供调试)
+        // --- 4. [关键] 注入时间戳头信息 ---
+        // 这行注释可以帮您确认：您运行的代码到底是新生成的，还是旧的缓存文件
+        const timeStr = new Date().toLocaleTimeString();
+        const headerInfo = `/* Build Time: ${timeStr} | Target: ${finalConfig.target} | StringArray: ${finalConfig.stringArray} */\n`;
+        obfuscatedCode = headerInfo + obfuscatedCode;
+
+        // --- 5. 返回结果 (包含最终配置供调试) ---
         const response = { 
             success: true, 
             code: obfuscatedCode,
