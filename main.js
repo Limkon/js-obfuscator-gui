@@ -7,7 +7,7 @@ let mainWindow;
 
 // --- 菜单配置 ---
 const createMenu = () => {
-    Menu.setApplicationMenu(null); // 简单粗暴：直接隐藏菜单栏 (看起来更像工具软件)
+    Menu.setApplicationMenu(null); 
 };
 
 // --- 创建窗口 ---
@@ -20,7 +20,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false // 关闭沙盒以避免部分权限问题
+            sandbox: false
         }
     });
     mainWindow.loadFile('index.html');
@@ -34,7 +34,6 @@ app.on('window-all-closed', () => {
 
 // --- IPC 通信逻辑 ---
 
-// 1. 文件选择
 ipcMain.handle('dialog:openFile', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
         properties: ['openFile'],
@@ -44,23 +43,20 @@ ipcMain.handle('dialog:openFile', async () => {
     return filePaths[0];
 });
 
-// 2. 核心混淆逻辑 (包含纯净模式修复)
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
-        console.log("后端收到请求 -> 模式:", type); // 调试日志
+        console.log("后端收到请求 -> 模式:", type); 
 
         let code = '';
         let inputPath = null;
 
-        // A. 区分数据来源
+        // A. 读取代码
         if (type === 'paste') {
-            // 粘贴模式：content 即源代码
             if (!content || typeof content !== 'string' || !content.trim()) {
                 throw new Error("代码内容为空");
             }
             code = content;
         } else {
-            // 文件模式：content 即文件路径
             if (!content) throw new Error("未选择文件");
             inputPath = content;
             try {
@@ -79,31 +75,29 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         };
         
         // --- [核心修复] 针对 Node.js 纯净模式的强力清洗 ---
-        // 目标：确保在 Node 环境运行绝对不会出现 window is not defined
         if (config.target === 'node-pure') {
             console.log("启动 Node.js 纯净模式：强制移除所有浏览器依赖...");
             
-            // 1. 修正 target 为标准的 'node' (混淆器库只认 'node')
+            // 1. 修正 target 为标准的 'node'
             config.target = 'node';
             
-            // 2. 强制清空域名锁定 (这是导致 window is not defined 的头号原因)
+            // 2. 强制清空域名锁定
             delete config.domainLock;
             delete config.domainLockRedirectUrl;
             
-            // 3. 强制关闭调试保护 (防止生成依赖 window/debugger 的检测代码)
+            // 3. 强制关闭调试保护
             config.debugProtection = false;
-            config.debugProtectionInterval = false;
             
-            // 4. (可选) 如果不需要自我保护，也可关闭，提高稳定性
-            // config.selfDefending = false; 
+            // [修复点]: 这里不能设为 false，必须直接删除该 key，否则校验器会报 "must be a number" 错误
+            delete config.debugProtectionInterval; 
         } 
         else if (config.target === 'node') {
-            // 普通 Node 模式，也建议清理域名锁定
+             // 普通 Node 模式清理
              delete config.domainLock;
              delete config.domainLockRedirectUrl;
         }
 
-        // 清理空配置 (常规清理)
+        // 清理空配置
         if (config.domainLock && config.domainLock.length === 0) delete config.domainLock;
         if (config.reservedStrings && config.reservedStrings.length === 0) delete config.reservedStrings;
         if (config.reservedNames && config.reservedNames.length === 0) delete config.reservedNames;
@@ -115,10 +109,8 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
 
         // D. 返回结果
         if (type === 'paste') {
-            // 直接返回代码
             return { success: true, code: obfuscatedCode };
         } else {
-            // 写入文件
             const dir = path.dirname(inputPath);
             const ext = path.extname(inputPath);
             const name = path.basename(inputPath, ext);
