@@ -41,7 +41,8 @@
 
         /* --- 下方配置区 --- */
         .config-title { font-size: 18px; color: #333; margin: 30px 0 15px 0; border-left: 4px solid var(--primary); padding-left: 10px; }
-        .config-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; transition: 0.3s; }
+        /* 修改 Grid 以适应新增面板，自动换行 */
+        .config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; transition: 0.3s; }
         
         .panel { background: white; padding: 15px; border-radius: 4px; border: 1px solid var(--border); }
         h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 8px; font-size: 14px; color: #333; margin-bottom: 12px; }
@@ -95,6 +96,13 @@
             <div class="form-item"><input type="radio" name="preset" value="low" id="pre_low"><label for="pre_low">低混淆 (高性能)</label></div>
             <div class="form-item"><input type="radio" name="preset" value="medium" id="pre_medium"><label for="pre_medium">中等混淆 (均衡)</label></div>
             <div class="form-item"><input type="radio" name="preset" value="high" id="pre_high"><label for="pre_high">高混淆 (低性能)</label></div>
+        </div>
+
+        <div class="panel">
+            <h3>运行环境 (Target)</h3>
+            <div class="form-item"><input type="radio" name="target" value="browser" checked id="target_browser"><label for="target_browser">Browser (浏览器)</label></div>
+            <div class="form-item"><input type="radio" name="target" value="browser-no-eval" id="target_browser_no_eval"><label for="target_browser_no_eval">Browser (无 Eval)</label></div>
+            <div class="form-item"><input type="radio" name="target" value="node" id="target_node"><label for="target_node">Node.js (服务端/Windows)</label></div>
         </div>
 
         <div class="panel">
