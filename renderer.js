@@ -24,6 +24,23 @@ document.addEventListener('DOMContentLoaded', () => {
         consoleContainer.scrollTop = consoleContainer.scrollHeight;
     }
 
+    // --- 复制日志功能 ---
+    const btnCopyLog = get('btn-copy-log');
+    if (btnCopyLog) {
+        btnCopyLog.addEventListener('click', () => {
+            const text = consoleContainer.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = btnCopyLog.innerText;
+                btnCopyLog.innerText = "已复制!";
+                // 1秒后恢复文字
+                setTimeout(() => btnCopyLog.innerText = originalText, 1000);
+            }).catch(err => {
+                console.error('Copy failed', err);
+                log("复制失败，请手动选中复制", "error");
+            });
+        });
+    }
+
     // --- 切换逻辑 ---
     function setMode(mode) {
         document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
