@@ -4,7 +4,7 @@ const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
 // --- 版本标识 (用于验证代码是否更新) ---
-const CORE_VERSION = "FIX_VER_2025_FINAL"; 
+const CORE_VERSION = "STRICT_FIX_VER_1.0"; 
 
 let mainWindow;
 
@@ -45,7 +45,6 @@ ipcMain.handle('dialog:openFile', async () => {
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
         console.log(`\n========== [后端日志 ${CORE_VERSION}] ==========`);
-        console.log("收到混淆请求。模式:", type);
         console.log("前端传入 Target:", options.target);
 
         let code = '';
@@ -61,56 +60,51 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         }
 
         // --- 核心逻辑：配置清洗 ---
-        // 复制一份配置，防止修改原对象
         let config = { ...options, ignoreRequireImports: true };
 
-        // ★★★ 强力拦截：如果是纯净模式，无视前端其他勾选，强制重置为最简配置 ★★★
+        // ★★★ 针对 Node.js 纯净模式的严格清洗 ★★★
         if (config.target === 'node-pure') {
-            console.log(">>> [纯净模式激活] 正在执行暴力清洗...");
+            console.log(">>> [纯净模式] 执行严格属性删除...");
             
-            // 强制覆盖为一个绝对安全的“白名单”配置对象
-            // 这会丢弃前端传递的所有可能导致报错的高级参数
-            config = {
-                target: 'node',               // 强制 Node 环境
-                compact: true,                // 允许压缩
-                simplify: true,               // 允许简单优化
-                
-                // --- 下面全是“禁止项”，确保不生成 window 相关代码 ---
-                stringArray: false,           // [关键] 彻底关闭字符串数组 (根除 sha224Hash)
-                stringArrayEncoding: [],      // [关键] 确保不使用 rc4/base64
-                
-                domainLock: [],               // 禁止域名锁定
-                domainLockRedirectUrl: undefined,
-                
-                debugProtection: false,       // 禁止调试保护
-                debugProtectionInterval: undefined,
-                
-                selfDefending: false,         // 禁止自我保护
-                splitStrings: false,          // 禁止字符串分割
-                unicodeEscapeSequence: false, // 禁止 Unicode 转义(有时会导致体积过大)
-                renameGlobals: false,         // 禁止重命名全局变量
-                controlFlowFlattening: false, // 禁止控制流平坦化(减少体积和环境依赖)
-                deadCodeInjection: false      // 禁止死代码注入
-            };
+            // 1. 修正目标环境
+            config.target = 'node';
+
+            // 2. [关键修复] 使用 delete 彻底移除不兼容的属性
+            // 只要这些 key 存在(哪怕是undefined)，校验器都会报错
+            delete config.domainLockRedirectUrl; 
+            delete config.debugProtectionInterval; 
+            delete config.domainLock;
             
-            console.log(">>> [清洗完成] 已强制关闭 stringArray, rc4, domainLock 等所有危险项。");
+            // 3. 强制关闭不兼容的功能
+            config.stringArray = false;           // 关闭字符串数组 (根除 sha224Hash)
+            config.stringArrayEncoding = [];      // 禁用编码
+            config.debugProtection = false;       // 关闭调试保护
+            config.selfDefending = false;         // 关闭自我保护
+            config.splitStrings = false;          // 关闭字符串分割
+            config.unicodeEscapeSequence = false; // 关闭Unicode转义
+            config.renameGlobals = false;         // 关闭全局变量重命名
+            config.controlFlowFlattening = false; // 关闭控制流平坦化
+            
+            console.log(">>> [清洗完成] 已物理删除 domainLockRedirectUrl 和 debugProtectionInterval");
         } 
         else if (config.target === 'node') {
-            // 普通 Node 模式：仅做最低限度的清理
-            delete config.domainLock;
+            // 普通 Node 模式：也必须删除 redirectUrl，否则会报同样的错
             delete config.domainLockRedirectUrl;
+            delete config.domainLock; 
+            
+            // 同样删除 interval 防止报错
+            delete config.debugProtectionInterval;
         }
-
-        // console.log("最终使用的配置:", JSON.stringify(config, null, 2)); // 调试用
+        else {
+            // 浏览器模式：如果用户没填 redirectUrl，也必须删除该 key，否则会报 URL 格式错误
+            if (!config.domainLockRedirectUrl || config.domainLockRedirectUrl.trim() === '') {
+                delete config.domainLockRedirectUrl;
+            }
+        }
 
         // 执行混淆
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
         const obfuscatedCode = obfuscationResult.getObfuscatedCode();
-
-        // 检查结果中是否意外包含了 sha224Hash (最后的防线)
-        if (obfuscatedCode.includes('sha224Hash') || obfuscatedCode.includes('window')) {
-             console.warn("⚠️ 警告：生成的代码中仍包含 window 或 sha224Hash，请检查配置！");
-        }
 
         if (type === 'paste') {
             return { success: true, code: obfuscatedCode };
@@ -125,6 +119,7 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
 
     } catch (error) {
         console.error("后端报错:", error);
-        return { success: false, message: error.message };
+        // 将具体的校验错误信息返回给前端
+        return { success: false, message: "混淆失败: " + error.message };
     }
 });
