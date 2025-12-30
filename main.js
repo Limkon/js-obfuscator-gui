@@ -44,7 +44,7 @@ ipcMain.handle('dialog:openFile', async () => {
     return filePaths[0];
 });
 
-// 2. 核心混淆逻辑 (修复了粘贴模式报错的问题)
+// 2. 核心混淆逻辑 (包含纯净模式修复)
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
         console.log("后端收到请求 -> 模式:", type); // 调试日志
@@ -71,14 +71,39 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         }
 
         // B. 整理配置
-        const config = {
+        let config = {
             ...options,
             stringArray: true,
             stringArrayEncoding: ['rc4'],
             ignoreRequireImports: true
         };
         
-        // 清理空配置
+        // --- [核心修复] 针对 Node.js 纯净模式的强力清洗 ---
+        // 目标：确保在 Node 环境运行绝对不会出现 window is not defined
+        if (config.target === 'node-pure') {
+            console.log("启动 Node.js 纯净模式：强制移除所有浏览器依赖...");
+            
+            // 1. 修正 target 为标准的 'node' (混淆器库只认 'node')
+            config.target = 'node';
+            
+            // 2. 强制清空域名锁定 (这是导致 window is not defined 的头号原因)
+            delete config.domainLock;
+            delete config.domainLockRedirectUrl;
+            
+            // 3. 强制关闭调试保护 (防止生成依赖 window/debugger 的检测代码)
+            config.debugProtection = false;
+            config.debugProtectionInterval = false;
+            
+            // 4. (可选) 如果不需要自我保护，也可关闭，提高稳定性
+            // config.selfDefending = false; 
+        } 
+        else if (config.target === 'node') {
+            // 普通 Node 模式，也建议清理域名锁定
+             delete config.domainLock;
+             delete config.domainLockRedirectUrl;
+        }
+
+        // 清理空配置 (常规清理)
         if (config.domainLock && config.domainLock.length === 0) delete config.domainLock;
         if (config.reservedStrings && config.reservedStrings.length === 0) delete config.reservedStrings;
         if (config.reservedNames && config.reservedNames.length === 0) delete config.reservedNames;
