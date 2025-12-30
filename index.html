@@ -47,8 +47,44 @@
         textarea.config-text { height: 40px; resize: vertical; font-family: monospace; }
         .help-text { color: #999; font-size: 11px; margin-bottom: 2px; }
 
-        /* --- 新增：日志控制台 --- */
-        #console-container { margin-top: 30px; border: 1px solid #333; border-radius: 4px; background: #1e1e1e; color: #00ff00; font-family: 'Consolas', monospace; font-size: 12px; padding: 10px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
+        /* --- 新增/修改：日志控制台样式 --- */
+        #console-container { 
+            margin-top: 10px; 
+            border: 1px solid #333; 
+            border-radius: 4px; 
+            background: #1e1e1e; 
+            color: #00ff00; 
+            font-family: 'Consolas', monospace; 
+            font-size: 12px; 
+            padding: 10px; 
+            height: 200px; 
+            overflow-y: auto; 
+            white-space: pre-wrap;
+            /* 关键修改：允许选中文字 */
+            user-select: text; 
+            cursor: text;
+        }
+        
+        .log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+        
+        #btn-copy-log {
+            padding: 4px 12px;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #555;
+            transition: 0.2s;
+        }
+        #btn-copy-log:hover { background: #f0f0f0; border-color: #bbb; }
+        #btn-copy-log:active { background: #e0e0e0; }
+
         .log-time { color: #888; margin-right: 10px; }
         .log-info { color: #4af; }
         .log-warn { color: #fa0; }
@@ -161,7 +197,10 @@
         </div>
     </div>
 
-    <div class="config-title">调试日志 (Debug Log)</div>
+    <div class="log-header">
+        <div class="config-title" style="margin: 0; border: none; padding: 0; border-left: 4px solid var(--primary); padding-left: 10px;">调试日志 (Debug Log)</div>
+        <button id="btn-copy-log">📄 复制日志</button>
+    </div>
     <div id="console-container">等待操作...</div>
 
     <script src="renderer.js"></script>
