@@ -41,11 +41,13 @@ ipcMain.handle('dialog:openFile', async () => {
 
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
+        console.log("------------------------------------------------");
         console.log("后端收到请求 -> 模式:", type); 
 
         let code = '';
         let inputPath = null;
 
+        // 1. 获取源代码
         if (type === 'paste') {
             if (!content || typeof content !== 'string' || !content.trim()) {
                 throw new Error("代码内容为空");
@@ -61,59 +63,63 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             }
         }
 
-        // B. 整理配置
+        // 2. 初始化配置
         let config = {
             ...options,
-            stringArray: true,
-            stringArrayEncoding: ['rc4'], // 默认使用强加密
             ignoreRequireImports: true
         };
-        
-        // --- [核心修复] Node.js 纯净模式：核弹级清理 ---
-        if (config.target === 'node-pure') {
-            console.log(">>> 启动 Node.js 纯净模式 <<<");
-            console.log("正在移除所有可能导致 window 报错的选项...");
 
-            // 1. 修正 target
+        // 3. 【核心修正】根据环境强行重置危险参数
+        if (config.target === 'node-pure') {
+            console.log(">>> 激活 Node.js 纯净兼容模式 (Pure Mode) <<<");
+            
+            // 强制设置为 node 目标
             config.target = 'node';
             
-            // 2. 彻底删除域名锁定 (window报错的主因)
-            delete config.domainLock;
+            // [关键] 禁用字符串加密编码
+            // rc4 和 base64 在某些 Node 环境下会生成 sha224Hash 导致 window 报错
+            // 设置为 [] 表示仅提取字符串到数组，但不进行复杂编码，这是最安全的
+            config.stringArrayEncoding = []; 
+            
+            // 禁用可能引入 global/window 访问的高级保护
+            config.domainLock = [];
             delete config.domainLockRedirectUrl;
             
-            // 3. 彻底删除调试保护 (数字校验报错的主因)
             config.debugProtection = false;
-            delete config.debugProtectionInterval; 
+            delete config.debugProtectionInterval; // 彻底删除以防校验报错
             
-            // 4. [新增] 强制关闭自我保护 (Node环境下极易导致死循环或报错)
-            config.selfDefending = false;
-
-            // 5. [新增] 降级字符串加密 (RC4算法有时会生成依赖环境的代码，降级为base64更安全)
-            config.stringArrayEncoding = ['base64'];
+            config.selfDefending = false; // 自我保护在 Node 下极易报错
+            config.splitStrings = false;  // 禁用字符串分割，减少辅助函数
+            config.renameGlobals = false; // 不重命名全局变量(如 process, require)
             
-            // 6. [新增] 关闭字符串分割 (减少生成的辅助代码量)
-            config.splitStrings = false;
+            console.log("已屏蔽: 域名锁定, 调试保护, 自我保护, 字符串加密算法");
         } 
         else if (config.target === 'node') {
-             // 普通 Node 模式也建议清理域名锁定
-             delete config.domainLock;
+             // 普通 Node 模式：仅删除域名锁定，保留其他
+             config.domainLock = [];
              delete config.domainLockRedirectUrl;
+             // 如果是普通 Node 模式，可以使用 base64，比 rc4 兼容性好
+             config.stringArrayEncoding = ['base64'];
+        } 
+        else {
+            // 浏览器模式：默认开启 rc4 强加密
+             config.stringArrayEncoding = ['rc4'];
         }
 
-        // 常规清理：删除空数组配置
-        if (config.domainLock && config.domainLock.length === 0) delete config.domainLock;
-        if (config.reservedStrings && config.reservedStrings.length === 0) delete config.reservedStrings;
-        if (config.reservedNames && config.reservedNames.length === 0) delete config.reservedNames;
+        // 清理无效的空配置
+        if (config.domainLock && config.domainLock.length === 0) config.domainLock = [];
+        if (config.reservedStrings && config.reservedStrings.length === 0) config.reservedStrings = [];
+        if (config.reservedNames && config.reservedNames.length === 0) config.reservedNames = [];
         if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
 
-        // 打印最终配置 (调试用)
+        // 调试：打印最终生效的配置
         // console.log("Final Config:", JSON.stringify(config, null, 2));
 
-        // C. 执行混淆
+        // 4. 执行混淆
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
         const obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // D. 返回结果
+        // 5. 输出结果
         if (type === 'paste') {
             return { success: true, code: obfuscatedCode };
         } else {
