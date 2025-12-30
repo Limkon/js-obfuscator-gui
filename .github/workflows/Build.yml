@@ -1,6 +1,6 @@
 name: Build Windows Exe
 
-# 修改点：仅保留手动触发
+# 仅手动触发
 on:
   workflow_dispatch:
 
@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: 18
 
+      # 缓存 node_modules 以加速后续步骤
       - name: Cache node_modules
         id: cache-node
         uses: actions/cache@v3
@@ -47,18 +48,23 @@ jobs:
         with:
           node-version: 18
 
+      # 恢复上个阶段的依赖
       - name: Restore node_modules
         uses: actions/cache@v3
         with:
           path: node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('package.json') }}
 
+      # 确保原生依赖 (如 electron) 链接正确
       - name: Rebuild Native Deps
         run: npm install
 
+      # 执行构建
+      # 关键修复：添加 "-- --publish never" 以避免 CI 环境下缺少 GH_TOKEN 的报错
       - name: Run Build
-        run: npm run dist
+        run: npm run dist -- --publish never
 
+      # 上传构建好的 exe 文件
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
