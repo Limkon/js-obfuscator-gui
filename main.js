@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// ★★★ 版本号：请在运行时的控制台寻找此字符串，确保代码生效 ★★★
-const CURRENT_VERSION = "FINAL_KILL_SHA224_V1"; 
+// ★★★ 版本标识：FINAL_COMPAT_V2 ★★★
+const CURRENT_VERSION = "FINAL_COMPAT_V2"; 
 
 let mainWindow;
 
@@ -45,12 +45,11 @@ ipcMain.handle('dialog:openFile', async () => {
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
         console.log(`\n========== [后端日志: ${CURRENT_VERSION}] ==========`);
-        console.log("正在处理混淆请求...");
+        console.log("前端传入 Target:", options.target);
 
         let code = '';
         let inputPath = null;
 
-        // 1. 读取代码
         if (type === 'paste') {
             if (!content || typeof content.trim() !== 'string') throw new Error("代码为空");
             code = content;
@@ -60,60 +59,48 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             code = fs.readFileSync(inputPath, 'utf8');
         }
 
-        // 2. 配置初始化
+        // --- 配置初始化 ---
         let config = { ...options, ignoreRequireImports: true };
 
-        // 3. ★★★ 绝杀逻辑：针对 Node.js 纯净模式的彻底清洗 ★★★
-        if (config.target === 'node-pure') {
-            console.log(">>> [纯净模式] 正在执行毁灭性清理...");
-            console.log(">>> 目标：彻底根除 sha224Hash 和 window 依赖");
-
-            // 强制指定环境
+        // ★★★ 核心修改：只要是 Node 环境，统统强制清理 ★★★
+        // 不管选的是 'node' 还是 'node-pure'，都执行最严格的安全策略
+        if (config.target === 'node' || config.target === 'node-pure') {
+            console.log(">>> [Node兼容模式] 正在强制移除浏览器依赖...");
+            
+            // 1. 统一修正为 node
             config.target = 'node';
 
-            // [核心动作] 彻底关闭字符串数组
-            // 只要这个是 true，混淆器就有可能生成 sha224Hash。必须关掉！
+            // 2. [绝杀] 强制关闭字符串数组
+            // 只要关闭这个，sha224Hash 和 window 依赖就绝对不会生成
             config.stringArray = false; 
-            
-            // 辅助清理：清空相关参数
             config.stringArrayEncoding = [];
-            config.stringArrayThreshold = 0;
             
-            // 移除所有校验报错项
+            // 3. 删除所有可能报错的校验项
             delete config.domainLock;
             delete config.domainLockRedirectUrl;
             delete config.debugProtectionInterval;
 
-            // 关闭其他高风险保护
+            // 4. 关闭其他风险项
             config.debugProtection = false;
             config.selfDefending = false;
             config.splitStrings = false;
-            config.unicodeEscapeSequence = false;
             
-            console.log(">>> [清理完毕] stringArray 已强制设为 false。");
+            console.log(">>> [安全策略生效] stringArray=false, 已移除所有环境依赖。");
         } 
-        else if (config.target === 'node') {
-            // 普通 Node 模式：仅删除校验报错项
-            delete config.domainLock;
-            delete config.domainLockRedirectUrl;
-            delete config.debugProtectionInterval;
-        }
         else {
-            // 浏览器模式：如果用户没填URL，需要删除该key防止校验错误
-             if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
+            // 浏览器模式：如果用户没填URL，删除该key防止校验错误
+            if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
         }
 
-        // 4. 执行混淆
+        // 执行混淆
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
         const obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // 5. [最后一道防线] 检查代码中是否依然包含毒药函数
+        // 验证代码
         if (obfuscatedCode.includes('sha224Hash')) {
-            console.error("!!! 严重警告：生成的代码中依然包含 sha224Hash !!!");
-            console.error("请检查是否没有重启程序，或 node_modules 版本过低。");
+            console.error("!!! 警告：代码中仍包含 sha224Hash，请检查是否选择了 Browser 模式 !!!");
         }
 
-        // 6. 返回结果
         if (type === 'paste') {
             return { success: true, code: obfuscatedCode };
         } else {
