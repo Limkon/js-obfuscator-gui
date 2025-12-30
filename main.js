@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// --- 版本标识 (用于验证代码是否更新) ---
-const CORE_VERSION = "STRICT_FIX_VER_1.0"; 
+// ★★★ 版本号：请在运行时的控制台寻找此字符串，确保代码生效 ★★★
+const CURRENT_VERSION = "FINAL_KILL_SHA224_V1"; 
 
 let mainWindow;
 
@@ -44,12 +44,13 @@ ipcMain.handle('dialog:openFile', async () => {
 
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
-        console.log(`\n========== [后端日志 ${CORE_VERSION}] ==========`);
-        console.log("前端传入 Target:", options.target);
+        console.log(`\n========== [后端日志: ${CURRENT_VERSION}] ==========`);
+        console.log("正在处理混淆请求...");
 
         let code = '';
         let inputPath = null;
 
+        // 1. 读取代码
         if (type === 'paste') {
             if (!content || typeof content.trim() !== 'string') throw new Error("代码为空");
             code = content;
@@ -59,53 +60,60 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             code = fs.readFileSync(inputPath, 'utf8');
         }
 
-        // --- 核心逻辑：配置清洗 ---
+        // 2. 配置初始化
         let config = { ...options, ignoreRequireImports: true };
 
-        // ★★★ 针对 Node.js 纯净模式的严格清洗 ★★★
+        // 3. ★★★ 绝杀逻辑：针对 Node.js 纯净模式的彻底清洗 ★★★
         if (config.target === 'node-pure') {
-            console.log(">>> [纯净模式] 执行严格属性删除...");
-            
-            // 1. 修正目标环境
+            console.log(">>> [纯净模式] 正在执行毁灭性清理...");
+            console.log(">>> 目标：彻底根除 sha224Hash 和 window 依赖");
+
+            // 强制指定环境
             config.target = 'node';
 
-            // 2. [关键修复] 使用 delete 彻底移除不兼容的属性
-            // 只要这些 key 存在(哪怕是undefined)，校验器都会报错
-            delete config.domainLockRedirectUrl; 
-            delete config.debugProtectionInterval; 
+            // [核心动作] 彻底关闭字符串数组
+            // 只要这个是 true，混淆器就有可能生成 sha224Hash。必须关掉！
+            config.stringArray = false; 
+            
+            // 辅助清理：清空相关参数
+            config.stringArrayEncoding = [];
+            config.stringArrayThreshold = 0;
+            
+            // 移除所有校验报错项
             delete config.domainLock;
+            delete config.domainLockRedirectUrl;
+            delete config.debugProtectionInterval;
+
+            // 关闭其他高风险保护
+            config.debugProtection = false;
+            config.selfDefending = false;
+            config.splitStrings = false;
+            config.unicodeEscapeSequence = false;
             
-            // 3. 强制关闭不兼容的功能
-            config.stringArray = false;           // 关闭字符串数组 (根除 sha224Hash)
-            config.stringArrayEncoding = [];      // 禁用编码
-            config.debugProtection = false;       // 关闭调试保护
-            config.selfDefending = false;         // 关闭自我保护
-            config.splitStrings = false;          // 关闭字符串分割
-            config.unicodeEscapeSequence = false; // 关闭Unicode转义
-            config.renameGlobals = false;         // 关闭全局变量重命名
-            config.controlFlowFlattening = false; // 关闭控制流平坦化
-            
-            console.log(">>> [清洗完成] 已物理删除 domainLockRedirectUrl 和 debugProtectionInterval");
+            console.log(">>> [清理完毕] stringArray 已强制设为 false。");
         } 
         else if (config.target === 'node') {
-            // 普通 Node 模式：也必须删除 redirectUrl，否则会报同样的错
+            // 普通 Node 模式：仅删除校验报错项
+            delete config.domainLock;
             delete config.domainLockRedirectUrl;
-            delete config.domainLock; 
-            
-            // 同样删除 interval 防止报错
             delete config.debugProtectionInterval;
         }
         else {
-            // 浏览器模式：如果用户没填 redirectUrl，也必须删除该 key，否则会报 URL 格式错误
-            if (!config.domainLockRedirectUrl || config.domainLockRedirectUrl.trim() === '') {
-                delete config.domainLockRedirectUrl;
-            }
+            // 浏览器模式：如果用户没填URL，需要删除该key防止校验错误
+             if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
         }
 
-        // 执行混淆
+        // 4. 执行混淆
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
         const obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
+        // 5. [最后一道防线] 检查代码中是否依然包含毒药函数
+        if (obfuscatedCode.includes('sha224Hash')) {
+            console.error("!!! 严重警告：生成的代码中依然包含 sha224Hash !!!");
+            console.error("请检查是否没有重启程序，或 node_modules 版本过低。");
+        }
+
+        // 6. 返回结果
         if (type === 'paste') {
             return { success: true, code: obfuscatedCode };
         } else {
@@ -119,7 +127,6 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
 
     } catch (error) {
         console.error("后端报错:", error);
-        // 将具体的校验错误信息返回给前端
         return { success: false, message: "混淆失败: " + error.message };
     }
 });
