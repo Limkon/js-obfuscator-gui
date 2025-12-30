@@ -43,6 +43,7 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
     try {
         console.log("------------------------------------------------");
         console.log("后端收到请求 -> 模式:", type); 
+        console.log("用户选择的环境 target:", options.target); // 打印前端传来的选项
 
         let code = '';
         let inputPath = null;
@@ -69,51 +70,52 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             ignoreRequireImports: true
         };
 
-        // 3. 【核心修正】根据环境强行重置危险参数
+        // 3. 【核心修正】强制清洗逻辑
         if (config.target === 'node-pure') {
-            console.log(">>> 激活 Node.js 纯净兼容模式 (Pure Mode) <<<");
+            console.log("\n>>> 触发纯净模式: 已禁用所有不兼容选项 <<<");
             
-            // 强制设置为 node 目标
+            // 强制修正为 node
             config.target = 'node';
             
-            // [关键] 禁用字符串加密编码
-            // rc4 和 base64 在某些 Node 环境下会生成 sha224Hash 导致 window 报错
-            // 设置为 [] 表示仅提取字符串到数组，但不进行复杂编码，这是最安全的
-            config.stringArrayEncoding = []; 
+            // [核弹级修复] 直接关闭字符串数组
+            // 只要 stringArray 开启，rc4 算法就有可能生成 sha224Hash 导致报错
+            // 为了保证绝对运行成功，我们在纯净模式下直接关闭它
+            config.stringArray = false; 
+            config.stringArrayEncoding = [];
             
-            // 禁用可能引入 global/window 访问的高级保护
+            // 关闭其他所有可能引发错误的保护
             config.domainLock = [];
             delete config.domainLockRedirectUrl;
             
             config.debugProtection = false;
-            delete config.debugProtectionInterval; // 彻底删除以防校验报错
+            delete config.debugProtectionInterval; 
             
-            config.selfDefending = false; // 自我保护在 Node 下极易报错
-            config.splitStrings = false;  // 禁用字符串分割，减少辅助函数
-            config.renameGlobals = false; // 不重命名全局变量(如 process, require)
-            
-            console.log("已屏蔽: 域名锁定, 调试保护, 自我保护, 字符串加密算法");
+            config.selfDefending = false; 
+            config.splitStrings = false;  
+            config.renameGlobals = false;
+            config.controlFlowFlattening = false; // 控制流有时也会引入环境依赖，建议关闭或降低
+
+            console.log("已执行: stringArray=false, debugProtection=false, domainLock=[]\n");
         } 
         else if (config.target === 'node') {
-             // 普通 Node 模式：仅删除域名锁定，保留其他
+             // 普通 Node 模式：清理域名锁定
              config.domainLock = [];
              delete config.domainLockRedirectUrl;
-             // 如果是普通 Node 模式，可以使用 base64，比 rc4 兼容性好
+             // 普通模式允许 base64
+             config.stringArray = true;
              config.stringArrayEncoding = ['base64'];
         } 
         else {
-            // 浏览器模式：默认开启 rc4 强加密
+            // 浏览器模式：开启强力混淆
+             config.stringArray = true;
              config.stringArrayEncoding = ['rc4'];
         }
 
-        // 清理无效的空配置
+        // 清理无效配置
         if (config.domainLock && config.domainLock.length === 0) config.domainLock = [];
         if (config.reservedStrings && config.reservedStrings.length === 0) config.reservedStrings = [];
         if (config.reservedNames && config.reservedNames.length === 0) config.reservedNames = [];
         if (!config.domainLockRedirectUrl) delete config.domainLockRedirectUrl;
-
-        // 调试：打印最终生效的配置
-        // console.log("Final Config:", JSON.stringify(config, null, 2));
 
         // 4. 执行混淆
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, config);
