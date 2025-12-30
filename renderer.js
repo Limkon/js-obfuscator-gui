@@ -96,8 +96,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // 步骤 C: 收集配置
         const getCheck = (id) => get(id) ? get(id).checked : false;
         const getVal = (id) => get(id) ? get(id).value : '';
+        const getRadio = (name) => {
+            const el = document.querySelector(`input[name="${name}"]:checked`);
+            return el ? el.value : null;
+        };
         
         const options = {
+            target: getRadio('target') || 'browser',
             compact: getCheck('compact'),
             selfDefending: getCheck('selfDefending'),
             debugProtection: getCheck('debugProtection'),
