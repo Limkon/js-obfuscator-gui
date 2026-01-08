@@ -22,6 +22,25 @@
         textarea.code-area { width: 100%; height: 100%; border: none; padding: 15px; box-sizing: border-box; resize: none; font-family: 'Consolas', monospace; font-size: 13px; color: #333; outline: none; line-height: 1.5; }
         textarea.code-area:focus { background: #fafafa; }
 
+        /* --- 新增：悬浮按钮样式 --- */
+        .overlay-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            padding: 5px 12px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #555;
+            transition: 0.2s;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .overlay-btn:hover { background: #f0f0f0; color: #333; border-color: #bbb; }
+        .overlay-btn:active { background: #e0e0e0; transform: translateY(1px); }
+
         .file-mode-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #999; }
         .file-display { margin-top: 15px; font-weight: bold; color: #333; display: none; word-break: break-all; padding: 0 20px; text-align: center;}
         #btn-select-file { padding: 10px 25px; background: white; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: 0.2s; }
@@ -47,7 +66,7 @@
         textarea.config-text { height: 40px; resize: vertical; font-family: monospace; }
         .help-text { color: #999; font-size: 11px; margin-bottom: 2px; }
 
-        /* --- 新增/修改：日志控制台样式 --- */
+        /* --- 日志控制台样式 --- */
         #console-container { 
             margin-top: 10px; 
             border: 1px solid #333; 
@@ -60,7 +79,6 @@
             height: 200px; 
             overflow-y: auto; 
             white-space: pre-wrap;
-            /* 关键修改：允许选中文字 */
             user-select: text; 
             cursor: text;
         }
@@ -103,6 +121,7 @@
 
         <div id="tab-paste" class="tab-content active">
             <textarea id="rawCodeInput" class="code-area" placeholder="// 在此处粘贴您的 JavaScript 源代码..."></textarea>
+            <button id="btn-clear-code" class="overlay-btn" title="清空代码">🗑️ 清空</button>
         </div>
 
         <div id="tab-file" class="tab-content">
@@ -115,6 +134,7 @@
 
         <div id="tab-result" class="tab-content">
             <textarea id="resultOutput" class="code-area" readonly placeholder="点击“混淆加密”后，结果将显示在这里..."></textarea>
+            <button id="btn-copy-result" class="overlay-btn" title="复制结果">📋 复制结果</button>
         </div>
 
         <div class="action-bar">
@@ -124,7 +144,6 @@
     </div>
 
     <div class="config-title">高级参数配置</div>
-
     <div class="config-grid" id="configPanel">
         <div class="panel">
             <h3>混淆选项预设</h3>
