@@ -41,6 +41,44 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- 新增功能：清空代码按钮 ---
+    const btnClearCode = get('btn-clear-code');
+    if (btnClearCode) {
+        btnClearCode.addEventListener('click', () => {
+            const rawCodeInput = get('rawCodeInput');
+            if (rawCodeInput) {
+                rawCodeInput.value = '';
+                rawCodeInput.focus();
+                log("操作：已清空源码输入区", "info");
+            }
+        });
+    }
+
+    // --- 新增功能：复制结果按钮 ---
+    const btnCopyResult = get('btn-copy-result');
+    if (btnCopyResult) {
+        btnCopyResult.addEventListener('click', () => {
+            const resultOutput = get('resultOutput');
+            const text = resultOutput ? resultOutput.value : '';
+            
+            if (!text) {
+                log("复制失败：结果区为空", "warn");
+                return;
+            }
+
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = btnCopyResult.innerText;
+                btnCopyResult.innerText = "✅ 已复制!";
+                // 1.5秒后恢复文字
+                setTimeout(() => btnCopyResult.innerText = originalText, 1500);
+                log("操作：混淆结果已复制到剪贴板", "info");
+            }).catch(err => {
+                console.error('Copy failed', err);
+                log("复制失败: " + err, "error");
+            });
+        });
+    }
+
     // --- 切换逻辑 ---
     function setMode(mode) {
         document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
