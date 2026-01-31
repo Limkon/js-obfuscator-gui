@@ -13,7 +13,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const contentPaste = get('tab-paste');
     const contentFile = get('tab-file');
     const contentResult = get('tab-result');
-    const sizeStats = get('size-stats'); // 新增
+    const sizeStats = get('size-stats'); 
+
+    // --- 新增：右键菜单支持 ---
+    const codeAreas = document.querySelectorAll('.code-area');
+    codeAreas.forEach(area => {
+        area.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            window.electronAPI.showContextMenu();
+        });
+    });
 
     // --- 工具函数：格式化字节 ---
     function formatBytes(bytes, decimals = 2) {
