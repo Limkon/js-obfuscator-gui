@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// ★★★ 版本号：CF_WORKER_PATCH_V7 ★★★
-const CURRENT_VERSION = "CF_WORKER_PATCH_V7"; 
+// ★★★ 版本号：CF_WORKER_PATCH_V7_SIZE_STATS ★★★
+const CURRENT_VERSION = "CF_WORKER_PATCH_V7_SIZE_STATS"; 
 
 let mainWindow;
 
@@ -59,23 +59,21 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             code = fs.readFileSync(inputPath, 'utf8');
         }
 
+        // --- 新增：计算原始体积 ---
+        const originalSize = Buffer.byteLength(code, 'utf8');
+
         // --- 1. 配置处理逻辑 ---
         let finalConfig = { ...options, ignoreRequireImports: true };
 
         // --- 2. 强制清洗逻辑 ---
         if (finalConfig.target === 'node-pure') {
             console.log(">>> [纯净模式] 强制关闭 StringArray，并准备注入 Worker 补丁");
-            finalConfig.target = 'node'; // 保持 node 目标以避免 excessive DOM code
-            
-            // 强制关闭导致报错的加密项
+            finalConfig.target = 'node'; 
             finalConfig.stringArray = false; 
             finalConfig.stringArrayEncoding = [];
-            
-            // 关闭其他
             finalConfig.debugProtection = false;
             finalConfig.selfDefending = false;
             finalConfig.splitStrings = false; 
-            
             finalConfig.domainLock = [];
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
@@ -93,22 +91,26 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, finalConfig);
         let obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // --- 4. [核心修复] 注入 Cloudflare Worker 兼容补丁 ---
-        // 这段代码会在混淆代码运行前执行，手动定义 window 对象，防止报错
-        
-        // 修改说明：已移除注释信息，保留功能性代码
+        // --- 4. [核心修复] 注入 Cloudflare Worker 兼容补丁 (无注释版) ---
         const cfWorkerPatch = `
 var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
 var document = typeof document !== "undefined" ? document : { createElement: function(){ return { appendChild: function(){}, getContext: function(){} } } };
 `;
-        // 将补丁拼接到代码最前面
         obfuscatedCode = cfWorkerPatch + obfuscatedCode;
+
+        // --- 新增：计算混淆后体积 ---
+        const obfuscatedSize = Buffer.byteLength(obfuscatedCode, 'utf8');
 
         // --- 5. 返回结果 ---
         const response = { 
             success: true, 
             code: obfuscatedCode,
-            finalConfig: finalConfig 
+            finalConfig: finalConfig,
+            // 新增统计数据
+            stats: {
+                originalSize: originalSize,
+                obfuscatedSize: obfuscatedSize
+            }
         };
 
         if (type === 'file') {
