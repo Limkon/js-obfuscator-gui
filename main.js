@@ -95,15 +95,11 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
 
         // --- 4. [核心修复] 注入 Cloudflare Worker 兼容补丁 ---
         // 这段代码会在混淆代码运行前执行，手动定义 window 对象，防止报错
-        const timeStr = new Date().toLocaleTimeString();
         
+        // 修改说明：已移除注释信息，保留功能性代码
         const cfWorkerPatch = `
-/* [Patch V7] Cloudflare Worker Compatibility Header - Built at ${timeStr} */
-/* 作用：防止混淆器生成的代码因访问 window 而崩溃 */
 var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
 var document = typeof document !== "undefined" ? document : { createElement: function(){ return { appendChild: function(){}, getContext: function(){} } } };
-/* End Patch */
-
 `;
         // 将补丁拼接到代码最前面
         obfuscatedCode = cfWorkerPatch + obfuscatedCode;
