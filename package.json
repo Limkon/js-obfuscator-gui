@@ -13,6 +13,15 @@
     "appId": "com.local.obfuscator",
     "productName": "Obfuscator-GUI",
     "artifactName": "${productName}.${ext}",
+    "compression": "maximum",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "icon.ico",
+      "package.json"
+    ],
     "win": {
       "target": "portable",
       "icon": "icon.ico"
