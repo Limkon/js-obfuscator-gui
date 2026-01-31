@@ -13,6 +13,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const contentPaste = get('tab-paste');
     const contentFile = get('tab-file');
     const contentResult = get('tab-result');
+    const sizeStats = get('size-stats'); // 新增
+
+    // --- 工具函数：格式化字节 ---
+    function formatBytes(bytes, decimals = 2) {
+        if (!+bytes) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+    }
 
     // --- 日志函数 ---
     function log(msg, type = 'info') {
@@ -49,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 rawCodeInput.value = '';
                 rawCodeInput.focus();
                 log("操作：已清空源码输入区", "info");
+                if(sizeStats) sizeStats.style.display = 'none';
             }
         });
     }
@@ -111,21 +123,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 get('file-path-display').style.display = 'block';
                 btnSelectFile.innerText = "已选择 (点击更换)";
                 log(`已选择文件: ${path}`);
+                if(sizeStats) sizeStats.style.display = 'none';
             }
         });
     }
 
-    // --- 预设联动逻辑 (新增 Minimal 模式) ---
+    // --- 预设联动逻辑 ---
     function applyPreset(preset) {
         const setCheck = (id, val) => { if(get(id)) get(id).checked = val; };
         const setVal = (id, val) => { if(get(id)) get(id).value = val; };
 
         if (preset === 'minimal') {
-            // 极简模式：关闭所有增加体积的选项，开启压缩
             setCheck('compact', true);
             setCheck('simplify', true);
-            
-            // 关闭膨胀代码的选项
             setCheck('selfDefending', false);
             setCheck('debugProtection', false);
             setCheck('disableConsoleOutput', false);
@@ -134,11 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
             setCheck('unicodeEscapeSequence', false);
             setCheck('deadCodeInjection', false);
             setCheck('controlFlowFlattening', false);
-            setCheck('renameGlobals', false); // 重命名全局变量有时会增加复杂度
-            
-            // 关键：使用 mangled (如 a, b, c) 代替 hex (如 _0x1a2b)
+            setCheck('renameGlobals', false);
             setVal('identifierNamesGenerator', 'mangled');
-            
             log(">>> 已应用：极简模式 (体积最小化配置)", "info");
         } 
         else if (preset === 'high') {
@@ -169,6 +176,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusMsg = get('status-msg');
         const rawCodeInput = get('rawCodeInput');
         
+        // 重置显示
+        if(sizeStats) sizeStats.style.display = 'none';
+
         // 1. 准备数据
         let payloadContent = null;
         let payloadType = currentMode;
@@ -246,6 +256,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 statusMsg.style.color = "green";
                 log("后端返回：混淆成功！", "info");
                 
+                // --- 更新体积统计 ---
+                if (result.stats && sizeStats) {
+                    const { originalSize, obfuscatedSize } = result.stats;
+                    const diff = obfuscatedSize - originalSize;
+                    const diffClass = diff >= 0 ? 'diff-up' : 'diff-down';
+                    const diffSign = diff >= 0 ? '+' : '';
+                    
+                    sizeStats.innerHTML = `
+                        原始: <span class="highlight">${formatBytes(originalSize)}</span> 
+                        → 混淆后: <span class="highlight">${formatBytes(obfuscatedSize)}</span> 
+                        (<span class="${diffClass}">${diffSign}${formatBytes(diff)}</span>)
+                    `;
+                    sizeStats.style.display = 'inline-block';
+                    log(`体积统计: ${formatBytes(originalSize)} -> ${formatBytes(obfuscatedSize)}`, "info");
+                }
+
                 if (result.finalConfig) {
                    log("后端实际使用的最终配置 (Final Config):\n" + JSON.stringify(result.finalConfig, null, 2));
                 }
