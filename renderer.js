@@ -32,7 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
             navigator.clipboard.writeText(text).then(() => {
                 const originalText = btnCopyLog.innerText;
                 btnCopyLog.innerText = "已复制!";
-                // 1秒后恢复文字
                 setTimeout(() => btnCopyLog.innerText = originalText, 1000);
             }).catch(err => {
                 console.error('Copy failed', err);
@@ -69,7 +68,6 @@ document.addEventListener('DOMContentLoaded', () => {
             navigator.clipboard.writeText(text).then(() => {
                 const originalText = btnCopyResult.innerText;
                 btnCopyResult.innerText = "✅ 已复制!";
-                // 1.5秒后恢复文字
                 setTimeout(() => btnCopyResult.innerText = originalText, 1500);
                 log("操作：混淆结果已复制到剪贴板", "info");
             }).catch(err => {
@@ -116,6 +114,54 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --- 预设联动逻辑 (新增 Minimal 模式) ---
+    function applyPreset(preset) {
+        const setCheck = (id, val) => { if(get(id)) get(id).checked = val; };
+        const setVal = (id, val) => { if(get(id)) get(id).value = val; };
+
+        if (preset === 'minimal') {
+            // 极简模式：关闭所有增加体积的选项，开启压缩
+            setCheck('compact', true);
+            setCheck('simplify', true);
+            
+            // 关闭膨胀代码的选项
+            setCheck('selfDefending', false);
+            setCheck('debugProtection', false);
+            setCheck('disableConsoleOutput', false);
+            setCheck('numbersToExpressions', false);
+            setCheck('splitStrings', false);
+            setCheck('unicodeEscapeSequence', false);
+            setCheck('deadCodeInjection', false);
+            setCheck('controlFlowFlattening', false);
+            setCheck('renameGlobals', false); // 重命名全局变量有时会增加复杂度
+            
+            // 关键：使用 mangled (如 a, b, c) 代替 hex (如 _0x1a2b)
+            setVal('identifierNamesGenerator', 'mangled');
+            
+            log(">>> 已应用：极简模式 (体积最小化配置)", "info");
+        } 
+        else if (preset === 'high') {
+            setCheck('controlFlowFlattening', true);
+            setCheck('deadCodeInjection', true);
+            setCheck('selfDefending', true);
+            setCheck('debugProtection', true);
+            setVal('identifierNamesGenerator', 'hexadecimal');
+            log(">>> 已应用：高强度混淆", "info");
+        }
+        else if (preset === 'default') {
+            setCheck('compact', true);
+            setCheck('controlFlowFlattening', false);
+            setCheck('deadCodeInjection', false);
+            setCheck('selfDefending', false);
+            setVal('identifierNamesGenerator', 'hexadecimal');
+            log(">>> 已应用：默认配置", "info");
+        }
+    }
+
+    document.querySelectorAll('input[name="preset"]').forEach(radio => {
+        radio.addEventListener('change', (e) => applyPreset(e.target.value));
+    });
 
     // --- 运行混淆 ---
     const btnRun = get('btn-run');
@@ -220,12 +266,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 预设联动
+    // 初始化联动
     document.querySelectorAll('input[name="preset"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-             if(e.target.value === 'high') {
-                 if(get('controlFlowFlattening')) get('controlFlowFlattening').checked = true;
-             }
-        });
+        if(radio.checked) applyPreset(radio.value);
     });
 });
