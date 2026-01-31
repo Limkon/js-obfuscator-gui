@@ -3,8 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-// ★★★ 版本号：CF_WORKER_PATCH_V7_SIZE_STATS ★★★
-const CURRENT_VERSION = "CF_WORKER_PATCH_V7_SIZE_STATS"; 
+// ★★★ 版本号：CF_WORKER_PATCH_V7_MENU_SUPPORT ★★★
+const CURRENT_VERSION = "CF_WORKER_PATCH_V7_MENU_SUPPORT"; 
 
 let mainWindow;
 
@@ -31,6 +31,20 @@ app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
+});
+
+// --- 新增：右键菜单 IPC 监听 ---
+ipcMain.on('show-context-menu', (event) => {
+    const template = [
+        { label: '全选', role: 'selectAll' },
+        { type: 'separator' },
+        { label: '剪切', role: 'cut' },
+        { label: '复制', role: 'copy' },
+        { label: '粘贴', role: 'paste' },
+        { label: '删除', role: 'delete' }
+    ];
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({ window: BrowserWindow.fromWebContents(event.sender) });
 });
 
 ipcMain.handle('dialog:openFile', async () => {
@@ -106,7 +120,6 @@ var document = typeof document !== "undefined" ? document : { createElement: fun
             success: true, 
             code: obfuscatedCode,
             finalConfig: finalConfig,
-            // 新增统计数据
             stats: {
                 originalSize: originalSize,
                 obfuscatedSize: obfuscatedSize
