@@ -106,8 +106,8 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         let obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
         // --- 4. [核心修复] 注入 Cloudflare Worker 兼容补丁 (无注释版) ---
-        const cfWorkerPatch = `
-var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
+        // 修复说明：移除了模板字符串开头的换行符，防止混淆结果出现首行空行
+        const cfWorkerPatch = `var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
 var document = typeof document !== "undefined" ? document : { createElement: function(){ return { appendChild: function(){}, getContext: function(){} } } };
 `;
         obfuscatedCode = cfWorkerPatch + obfuscatedCode;
