@@ -2,9 +2,11 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
+// [新增] 引入自定义 AST 处理器
+const applyCustomRules = require('./custom-ast'); 
 
-// ★★★ 版本号：CF_WORKER_PATCH_V7_MENU_SUPPORT ★★★
-const CURRENT_VERSION = "CF_WORKER_PATCH_V7_MENU_SUPPORT"; 
+// ★★★ 版本号：CF_WORKER_PATCH_V7_MENU_SUPPORT_AST ★★★
+const CURRENT_VERSION = "CF_WORKER_PATCH_V7_MENU_SUPPORT_AST"; 
 
 let mainWindow;
 
@@ -60,6 +62,7 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
     try {
         console.log(`\n========== [后端日志: ${CURRENT_VERSION}] ==========`);
         console.log("前端传入 Target:", options.target);
+        console.log("自定义 AST 开关:", options.enableCustomAST); // [新增] 日志
 
         let code = '';
         let inputPath = null;
@@ -76,8 +79,18 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
         // --- 新增：计算原始体积 ---
         const originalSize = Buffer.byteLength(code, 'utf8');
 
+        // --- [核心变更] 执行自定义 AST 混淆 ---
+        if (options.enableCustomAST) {
+            console.log(">>> 正在执行自定义 AST 预处理...");
+            // 这里将源代码先进行一轮自定义 AST 转换，结果作为下一轮的输入
+            code = applyCustomRules(code);
+        }
+
         // --- 1. 配置处理逻辑 ---
         let finalConfig = { ...options, ignoreRequireImports: true };
+
+        // [清理] 删除自定义选项，防止标准混淆器报错或产生警告
+        delete finalConfig.enableCustomAST;
 
         // --- 2. 强制清洗逻辑 ---
         if (finalConfig.target === 'node-pure') {
