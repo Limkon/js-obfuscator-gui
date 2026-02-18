@@ -2,17 +2,14 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
-// [新增] 引入自定义 AST 处理器
-const applyCustomRules = require('./custom-ast'); 
+const applyCustomRules = require('./custom-ast'); // 引入自定义规则
 
-// ★★★ 版本号：CF_WORKER_PATCH_V7_MENU_SUPPORT_AST ★★★
-const CURRENT_VERSION = "CF_WORKER_PATCH_V7_MENU_SUPPORT_AST"; 
+// ★★★ 版本号：v8.0_FORCE_FIX ★★★
+const CURRENT_VERSION = "v8.0_FORCE_FIX"; 
 
 let mainWindow;
 
-const createMenu = () => {
-    Menu.setApplicationMenu(null); 
-};
+const createMenu = () => { Menu.setApplicationMenu(null); };
 
 function createWindow() {
     createMenu();
@@ -35,7 +32,6 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
-// --- 新增：右键菜单 IPC 监听 ---
 ipcMain.on('show-context-menu', (event) => {
     const template = [
         { label: '全选', role: 'selectAll' },
@@ -61,9 +57,7 @@ ipcMain.handle('dialog:openFile', async () => {
 ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) => {
     try {
         console.log(`\n========== [后端日志: ${CURRENT_VERSION}] ==========`);
-        console.log("前端传入 Target:", options.target);
-        console.log("自定义 AST 开关:", options.enableCustomAST); // [新增] 日志
-
+        
         let code = '';
         let inputPath = null;
 
@@ -76,31 +70,42 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             code = fs.readFileSync(inputPath, 'utf8');
         }
 
-        // --- 新增：计算原始体积 ---
         const originalSize = Buffer.byteLength(code, 'utf8');
 
-        // --- [核心变更] 执行自定义 AST 混淆 ---
+        // --- 1. 执行自定义 AST (v8.0) ---
+        // 注意：这是第一道工序，彻底抹除明文
         if (options.enableCustomAST) {
-            console.log(">>> 正在执行自定义 AST 预处理...");
-            // 这里将源代码先进行一轮自定义 AST 转换，结果作为下一轮的输入
-            code = applyCustomRules(code);
+            console.log(">>> [Phase 1] 执行自定义 AST 混淆...");
+            try {
+                code = applyCustomRules(code);
+            } catch (astErr) {
+                console.error("AST处理异常:", astErr);
+            }
         }
 
-        // --- 1. 配置处理逻辑 ---
+        // --- 2. 配置处理与强制修正 ---
         let finalConfig = { ...options, ignoreRequireImports: true };
 
-        // [清理] 删除自定义选项，防止标准混淆器报错或产生警告
+        // ★★★ 核心修复：强制覆盖危险配置 ★★★
+        if (options.enableCustomAST) {
+            console.log(">>> [安全策略] 检测到自定义AST，强制关闭 Simplify 以防止代码还原");
+            finalConfig.simplify = false; // 必须关闭！否则 String.fromCharCode 会被还原成字符串
+        }
+
         delete finalConfig.enableCustomAST;
 
-        // --- 2. 强制清洗逻辑 ---
+        // --- 3. 针对 Node-Pure (Worker) 的特殊清洗 ---
         if (finalConfig.target === 'node-pure') {
-            console.log(">>> [纯净模式] 强制关闭 StringArray，并准备注入 Worker 补丁");
+            console.log(">>> [纯净模式] 优化配置适配 Cloudflare Worker");
             finalConfig.target = 'node'; 
-            finalConfig.stringArray = false; 
-            finalConfig.stringArrayEncoding = [];
+            
+            // Worker 环境建议关闭 StringArray 以减少体积和 CPU 消耗
+            // 但如果你非常在意混淆度，可以在 GUI 开启，这里只做兼容性调整
             finalConfig.debugProtection = false;
             finalConfig.selfDefending = false;
             finalConfig.splitStrings = false; 
+            
+            // 确保不包含浏览器特有的锁定
             finalConfig.domainLock = [];
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
@@ -114,21 +119,20 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             if (!finalConfig.domainLockRedirectUrl) delete finalConfig.domainLockRedirectUrl;
         }
 
-        // --- 3. 执行混淆 ---
+        // --- 4. 执行通用混淆 ---
+        console.log(">>> [Phase 2] 执行通用混淆...");
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, finalConfig);
         let obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // --- 4. [核心修复] 注入 Cloudflare Worker 兼容补丁 (无注释版) ---
-        // 修复说明：移除了模板字符串开头的换行符，防止混淆结果出现首行空行
+        // --- 5. 注入补丁 ---
         const cfWorkerPatch = `var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
 var document = typeof document !== "undefined" ? document : { createElement: function(){ return { appendChild: function(){}, getContext: function(){} } } };
 `;
         obfuscatedCode = cfWorkerPatch + obfuscatedCode;
 
-        // --- 新增：计算混淆后体积 ---
         const obfuscatedSize = Buffer.byteLength(obfuscatedCode, 'utf8');
 
-        // --- 5. 返回结果 ---
+        // --- 6. 返回结果 ---
         const response = { 
             success: true, 
             code: obfuscatedCode,
