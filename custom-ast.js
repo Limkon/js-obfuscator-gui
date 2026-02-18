@@ -1,129 +1,145 @@
 /**
- * custom-ast.js (v4.0 精准平衡版)
- * 目标：中文必混淆、VLESS必隐藏、Worker不超时
+ * custom-ast.js (v5.0 终极碎片化版)
+ * 核心功能：敏感词拆分拼接、非白名单全量加密、防止后续工具还原
  */
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generator = require('@babel/generator').default;
 const t = require('@babel/types');
 
-// --- 必杀名单：这些键名必须加密 (不区分大小写) ---
-const SENSITIVE_KEYS = [
-    'vless', 'vmess', 'trojan', 'shadowsocks', 'ss',
-    'uuid', 'password', 'ps', 'remark', 'remarks', 'name',
-    'address', 'host', 'port', 'sni', 'server', 'ip',
-    'alterid', 'security', 'type', 'network', 'grpc', 'ws'
-];
+// --- 配置区域 ---
+const CONFIG = {
+    // 1. 敏感词：遇到这些词，必须拆分 + 加密！(防止被还原)
+    SENSITIVE_WORDS: [
+        'vless', 'vmess', 'trojan', 'shadowsocks', 'ss',
+        'uuid', 'password', 'ps', 'remark', 'address', 'host', 'port', 
+        'sni', 'server', 'ip', 'alterid', 'security', 'network', 'grpc', 'ws'
+    ],
 
-// --- 保护名单：这些绝对不能动 (防止 Worker 挂掉) ---
-const PROTECTED_KEYS = [
-    'fetch', 'scheduled', 'addEventListener', 'handle',
-    'env', 'ctx', 'request', 'response', 'headers', 
-    'method', 'url', 'cf', 'body', 'redirect', 'status',
-    'window', 'document', 'self', 'globalThis',
-    'prototype', 'toString', 'length', 'substring', 'indexOf'
-];
+    // 2. 保护名单：Worker 运行时必需的 API，绝对不能动
+    PROTECTED_KEYS: [
+        'fetch', 'scheduled', 'addEventListener', 'handle',
+        'env', 'ctx', 'request', 'response', 'headers', 
+        'method', 'url', 'cf', 'body', 'redirect', 'status', 'ok',
+        'window', 'document', 'self', 'globalThis',
+        'prototype', 'toString', 'length', 'substring', 'indexOf', 'split', 'join',
+        'console', 'log', 'error', 'warn', 'info'
+    ]
+};
 
-// 混合加密函数：中文用 Unicode，英文用 Hex
+// 混合加密函数
 function encryptString(str) {
     if (!str) return str;
     let result = '';
-    let hasNonAscii = false;
-
     for (let i = 0; i < str.length; i++) {
         const code = str.charCodeAt(i);
-        if (code > 127) {
-            hasNonAscii = true;
-            result += '\\u' + code.toString(16).padStart(4, '0');
+        // 策略：为了防止被还原，尽量使用 \u (4位)，虽然体积大但更安全
+        if (code < 128) {
+             result += '\\x' + code.toString(16).padStart(2, '0');
         } else {
-            result += '\\x' + code.toString(16).padStart(2, '0');
+             result += '\\u' + code.toString(16).padStart(4, '0');
         }
     }
     return result;
 }
 
-// 判断是否包含中文字符 (或其他非 ASCII 字符)
-function hasChineseOrSpecial(str) {
-    // 只要有字符编码 > 127 (非标准ASCII)，就视为包含特殊字符/中文
-    for (let i = 0; i < str.length; i++) {
-        if (str.charCodeAt(i) > 127) return true;
+// 核心：敏感词拆分器
+// 输入: "vless" -> BinaryExpression: "\x76\x6c" + "\x65\x73\x73"
+function splitAndEncrypt(str) {
+    // 如果字符串太短，或者包含中文，直接整体加密
+    if (str.length < 4 || /[\u4e00-\u9fa5]/.test(str)) {
+        const enc = encryptString(str);
+        const literal = t.stringLiteral(str);
+        literal.extra = { rawValue: str, raw: '"' + enc + '"' };
+        return literal;
     }
-    return false;
+
+    // 拆分逻辑：拦腰切断
+    const mid = Math.floor(str.length / 2);
+    const part1 = str.slice(0, mid);
+    const part2 = str.slice(mid);
+
+    // 加密左半部分
+    const leftNode = t.stringLiteral(part1);
+    leftNode.extra = { rawValue: part1, raw: '"' + encryptString(part1) + '"' };
+
+    // 加密右半部分
+    const rightNode = t.stringLiteral(part2);
+    rightNode.extra = { rawValue: part2, raw: '"' + encryptString(part2) + '"' };
+
+    // 返回拼接表达式 (part1 + part2)
+    return t.binaryExpression('+', leftNode, rightNode);
 }
 
 function applyCustomRules(code) {
     if (!code || typeof code !== 'string') return code;
 
     try {
-        console.log(">>> [v4.0] 正在执行精准混淆 (VLESS隐藏 + 中文强制加密)...");
+        console.log(">>> [v5.0] 执行终极混淆：敏感词拆分 + 全量覆盖...");
         const ast = parser.parse(code, {
             sourceType: 'module',
             plugins: ['jsx', 'typescript', 'classProperties']
         });
 
         traverse(ast, {
-            // [规则1]: 对象键名精准打击
+            // [规则1]: 对象属性 (处理键名)
             ObjectProperty(path) {
-                const keyNode = path.node.key;
+                let keyNode = path.node.key;
                 let keyName = '';
 
-                // 获取键名
+                // 1.1 获取键名
                 if (t.isIdentifier(keyNode)) keyName = keyNode.name;
                 else if (t.isStringLiteral(keyNode)) keyName = keyNode.value;
                 else return;
 
-                const lowerKey = keyName.toLowerCase();
+                // 1.2 保护检查
+                if (CONFIG.PROTECTED_KEYS.includes(keyName)) return;
 
-                // 1. 如果在保护名单，绝对不动
-                if (PROTECTED_KEYS.includes(keyName)) return;
-
-                // 2. 判定是否需要加密
-                // 条件A: 在敏感词名单里 (VLESS, UUID 等)
-                // 条件B: 包含中文
-                const isSensitive = SENSITIVE_KEYS.some(k => lowerKey === k) || 
-                                    SENSITIVE_KEYS.some(k => lowerKey.includes(k)); // 模糊匹配，如 "vless_server"
-                const isChinese = hasChineseOrSpecial(keyName);
-
-                if (isSensitive || isChinese) {
-                    // 强制转为 StringLiteral 并加密
-                    path.node.key = t.stringLiteral(keyName);
-                    path.node.key.extra = {
-                        rawValue: keyName,
-                        raw: '"' + encryptString(keyName) + '"'
-                    };
-                }
+                // 1.3 敏感词判定
+                const lowerName = keyName.toLowerCase();
+                const isSensitive = CONFIG.SENSITIVE_WORDS.some(w => lowerName.includes(w));
+                
+                // 策略：敏感词必杀，其他非保护词也杀
+                // 强制转换为 StringLiteral 并加密
+                path.node.key = t.stringLiteral(keyName);
+                path.node.key.extra = {
+                    rawValue: keyName,
+                    raw: '"' + encryptString(keyName) + '"'
+                };
             },
 
-            // [规则2]: 字符串全量扫描
+            // [规则2]: 字符串字面量 (处理值)
             StringLiteral(path) {
                 const val = path.node.value;
-                if (!val) return;
+                if (!val || val.length < 2) return;
 
-                // 跳过 import 语句 (import '...' from '...')
+                // 跳过 import/export 语句
                 if (path.parentPath.isImportDeclaration() || path.parentPath.isExportDeclaration()) return;
-                
-                // 跳过作为对象键名的情况 (已经在规则1处理过了，或者是保护名单里的键)
+                // 跳过对象键名 (规则1已处理)
                 if (path.parentPath.isObjectProperty() && path.key === 'key') return;
 
-                // 核心判断逻辑
-                const isChinese = hasChineseOrSpecial(val);
-                const isSensitive = SENSITIVE_KEYS.some(k => val.toLowerCase().includes(k)); // 内容包含 VLESS 等
+                // 检查是否包含敏感词
+                const lowerVal = val.toLowerCase();
+                const isSensitive = CONFIG.SENSITIVE_WORDS.some(w => lowerVal.includes(w));
 
-                // 策略：
-                // 1. 如果包含中文 -> 100% 加密
-                // 2. 如果包含敏感词 -> 100% 加密
-                // 3. 普通短字符串(长度<4) -> 不加密 (节省性能)
-                // 4. 普通长字符串 -> 加密
-                
-                if (isChinese || isSensitive || val.length > 3) {
-                    // 防止重复处理
-                    if (path.node.extra && path.node.extra.raw && path.node.extra.raw.startsWith('\\')) return;
-
-                    path.node.extra = {
-                        rawValue: val,
-                        raw: '"' + encryptString(val) + '"'
-                    };
+                // 如果是敏感词 (如 "vless://...") -> 执行拆分加密！
+                if (isSensitive) {
+                    // console.log("发现敏感词，执行拆分:", val);
+                    const splitNode = splitAndEncrypt(val);
+                    path.replaceWith(splitNode);
+                    path.skip(); // 跳过新生成的节点，防止死循环
+                    return;
                 }
+
+                // 普通字符串 -> 只要不在保护名单，且包含特殊字符或长度够长，就加密
+                // 检查是否在保护名单 (防止 env.KEY 这种取值被加密)
+                if (CONFIG.PROTECTED_KEYS.includes(val)) return;
+
+                // 执行普通加密
+                path.node.extra = {
+                    rawValue: val,
+                    raw: '"' + encryptString(val) + '"'
+                };
             }
         });
 
@@ -137,7 +153,7 @@ function applyCustomRules(code) {
         return output.code;
 
     } catch (error) {
-        console.error("v4.0 混淆规则出错:", error);
+        console.error("v5.0 混淆失败:", error);
         return code;
     }
 }
