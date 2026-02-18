@@ -1,38 +1,46 @@
 /**
- * custom-ast.js
- * 高级 AST 混淆规则：包含自定义标识符重命名
+ * custom-ast.js (v2.0 强力混淆版)
+ * 修复：中文加密、对象键名隐藏、全量字符串十六进制化
  */
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generator = require('@babel/generator').default;
 const t = require('@babel/types');
 
-// --- 配置区域：你可以在这里自定义名字生成逻辑 ---
-const RENAME_SETTINGS = {
-    enabled: true,           // 是否开启重命名
-    prefix: '_0x',           // 变量前缀，防止与原生API冲突
-    mode: 'barcode'          // 模式: 'barcode' (lI1o0), 'random' (随机字符), 'counter' (var_1, var_2)
+// --- 配置区域 ---
+const CONFIG = {
+    renameVariables: true,   // 是否重命名变量
+    encryptStrings: true,    // 是否加密字符串
+    encryptObjectKeys: true, // 是否加密对象键名 (如 { name: 1 } -> { "\x6e...": 1 })
+    prefix: '_0x'            // 变量名前缀
 };
 
-// 工具：名字生成器
-function generateName(index) {
-    if (RENAME_SETTINGS.mode === 'counter') {
-        return `${RENAME_SETTINGS.prefix}var_${index}`;
+// 辅助：混合加密函数 (支持中文 Unicode)
+function encryptString(str) {
+    let result = '';
+    for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        // 0-127 使用 \xHH (两字符十六进制)
+        // 128+  使用 \uHHHH (四字符 Unicode，解决中文乱码问题)
+        if (code < 128) {
+            result += '\\x' + code.toString(16).padStart(2, '0');
+        } else {
+            result += '\\u' + code.toString(16).padStart(4, '0');
+        }
     }
-    
-    if (RENAME_SETTINGS.mode === 'random') {
-        return RENAME_SETTINGS.prefix + Math.random().toString(36).substring(2, 8);
-    }
+    return result;
+}
 
-    // [默认] 条形码模式：使用 l, I, 1, 0, O, o 组成难以辨认的字符
-    const chars = ['l', 'I', '1', '0', 'O', 'o'];
+// 辅助：生成混淆变量名 (lI0o 风格)
+function generateBarcodeName(index) {
+    const chars = ['I', 'l', '1', '0', 'O', 'o'];
     let res = '';
-    let num = index + 1; // 避免0
+    let num = index + 1;
     while (num > 0) {
         res = chars[num % chars.length] + res;
         num = Math.floor(num / chars.length);
     }
-    return RENAME_SETTINGS.prefix + res;
+    return CONFIG.prefix + res;
 }
 
 function applyCustomRules(code) {
@@ -44,65 +52,82 @@ function applyCustomRules(code) {
             plugins: ['jsx', 'typescript', 'classProperties']
         });
 
-        // 计数器，用于生成唯一名字
         let idCounter = 0;
 
         traverse(ast, {
-            // --- 规则 1: 标识符重命名 (核心逻辑) ---
+            // [规则1]: 标识符重命名 (变量、函数名)
             Scope(path) {
-                if (!RENAME_SETTINGS.enabled) return;
-
-                // 获取当前作用域下定义的所有变量/函数 (bindings)
+                if (!CONFIG.renameVariables) return;
+                
                 const bindings = path.scope.bindings;
-
                 Object.keys(bindings).forEach(oldName => {
-                    // 1. 生成新名字
-                    const newName = generateName(idCounter++);
-
-                    // 2. 安全重命名 (Babel 会自动更新所有引用位置)
-                    // 注意：重命名会修改 AST，path.scope.rename 是最安全的方法
+                    const newName = generateBarcodeName(idCounter++);
                     try {
                         path.scope.rename(oldName, newName);
-                    } catch (e) {
-                        // 忽略重命名失败的情况（极少数情况会发生）
-                    }
+                    } catch (e) {}
                 });
             },
 
-            // --- 规则 2: 数值混淆 (保留原有功能) ---
-            NumericLiteral(path) {
-                const value = path.node.value;
-                if (Number.isInteger(value) && value > 10 && !path.parentPath.isBinaryExpression()) {
-                    const part1 = Math.floor(value / 2);
-                    const part2 = value - part1;
-                    path.replaceWith(t.parenthesizedExpression(
-                        t.binaryExpression('+', t.numericLiteral(part1), t.numericLiteral(part2))
-                    ));
-                    path.skip();
+            // [规则2]: 对象属性键名加密
+            // 效果: { VLESS: "ws" }  ->  { "\x56\x4c\x45\x53\x53": "ws" }
+            ObjectProperty(path) {
+                if (!CONFIG.encryptObjectKeys) return;
+                
+                const keyNode = path.node.key;
+                
+                // 如果键是简单的标识符 (如 name: "val")，将其转换为字符串字面量
+                if (t.isIdentifier(keyNode) && !path.node.computed) {
+                    const keyName = keyNode.name;
+                    // 创建一个新的 StringLiteral 替代 Identifier
+                    path.node.key = t.stringLiteral(keyName);
+                    
+                    // 立即加密这个新生成的字符串节点
+                    const encrypted = encryptString(keyName);
+                    path.node.key.extra = {
+                        rawValue: keyName,
+                        raw: '"' + encrypted + '"'
+                    };
                 }
             },
-            
-            // --- 规则 3: 字符串简单加密 (示例) ---
-            // 将 "hello" 变成 "\x68\x65\x6c\x6c\x6f"
-            StringLiteral(path) {
-                // 跳过 import 语句中的字符串 和 对象属性key
-                if (path.parentPath.isImportDeclaration() || path.key === 'key') return;
-                
-                // 仅处理未被处理过的
-                if (path.node.extra && path.node.extra.raw && path.node.extra.raw.startsWith('\\x')) return;
 
+            // [规则3]: 全量字符串加密 (含中文修复)
+            StringLiteral(path) {
+                if (!CONFIG.encryptStrings) return;
+
+                // 跳过模块导入 import '...'
+                if (path.parentPath.isImportDeclaration()) return;
+                // 跳过已经是 ObjectProperty key 的情况（因为上面规则2已经处理过了，避免双重处理）
+                if (path.parentPath.isObjectProperty() && path.key === 'key') return;
+                
+                // 防止重复处理
+                if (path.node.extra && path.node.extra.raw && (path.node.extra.raw.startsWith('"\\x') || path.node.extra.raw.startsWith('"\\u'))) return;
+
+                const val = path.node.value;
+                const encrypted = encryptString(val);
+                
+                // 强制写入 extra 属性，Babel 生成代码时会优先使用 raw 字段
+                path.node.extra = {
+                    rawValue: val,
+                    raw: '"' + encrypted + '"'
+                };
+            },
+
+            // [规则4]: 数值拆分 (123 -> 61+62)
+            NumericLiteral(path) {
                 const value = path.node.value;
-                // 简单的只针对短字符串演示，避免体积爆炸
-                if (value.length > 0 && value.length < 20) {
-                    let hex = '';
-                    for (let i = 0; i < value.length; i++) {
-                        hex += '\\x' + value.charCodeAt(i).toString(16).padStart(2, '0');
-                    }
-                    path.node.extra = { raw: `"${hex}"`, rawValue: hex };
+                if (Number.isInteger(value) && value > 100 && !path.parentPath.isBinaryExpression()) {
+                   // 仅处理大数字，避免代码膨胀过快
+                    const p1 = Math.floor(value / 2);
+                    const p2 = value - p1;
+                    path.replaceWith(t.parenthesizedExpression(
+                        t.binaryExpression('+', t.numericLiteral(p1), t.numericLiteral(p2))
+                    ));
+                    path.skip();
                 }
             }
         });
 
+        // 生成代码 (关闭 jsonCompatibleStrings 以允许 \x 转义)
         const output = generator(ast, {
             minified: true,
             comments: false,
@@ -112,8 +137,8 @@ function applyCustomRules(code) {
         return output.code;
 
     } catch (error) {
-        console.error("自定义 AST 规则执行出错:", error);
-        return code; // 报错则降级返回源码
+        console.error("自定义 AST 致命错误:", error);
+        return code;
     }
 }
 
