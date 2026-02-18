@@ -2,14 +2,16 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const JavaScriptObfuscator = require('javascript-obfuscator');
-const applyCustomRules = require('./custom-ast'); // 引入自定义规则
+// 引入自定义 AST 处理逻辑
+const applyCustomRules = require('./custom-ast'); 
 
-// ★★★ 版本号：v8.0_FORCE_FIX ★★★
-const CURRENT_VERSION = "v8.0_FORCE_FIX"; 
+const CURRENT_VERSION = "v9.0_UI_CONTROL"; 
 
 let mainWindow;
 
-const createMenu = () => { Menu.setApplicationMenu(null); };
+const createMenu = () => {
+    Menu.setApplicationMenu(null); 
+};
 
 function createWindow() {
     createMenu();
@@ -32,13 +34,14 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
+// 右键菜单
 ipcMain.on('show-context-menu', (event) => {
     const template = [
         { label: '全选', role: 'selectAll' },
         { type: 'separator' },
-        { label: '剪切', role: 'cut' },
         { label: '复制', role: 'copy' },
         { label: '粘贴', role: 'paste' },
+        { label: '剪切', role: 'cut' },
         { label: '删除', role: 'delete' }
     ];
     const menu = Menu.buildFromTemplate(template);
@@ -72,40 +75,46 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
 
         const originalSize = Buffer.byteLength(code, 'utf8');
 
-        // --- 1. 执行自定义 AST (v8.0) ---
-        // 注意：这是第一道工序，彻底抹除明文
+        // --- 1. 执行自定义 AST 混淆 (Phase 1) ---
         if (options.enableCustomAST) {
             console.log(">>> [Phase 1] 执行自定义 AST 混淆...");
+            
+            // 构建配置对象，传入用户定义的关键词
+            const customConfig = {
+                sensitiveWords: options.astKeywords || []
+            };
+            
             try {
-                code = applyCustomRules(code);
+                // 调用 custom-ast.js
+                code = applyCustomRules(code, customConfig);
             } catch (astErr) {
-                console.error("AST处理异常:", astErr);
+                console.error("!!! AST处理异常，降级使用源码:", astErr);
             }
         }
 
-        // --- 2. 配置处理与强制修正 ---
+        // --- 2. 配置清洗与处理 ---
         let finalConfig = { ...options, ignoreRequireImports: true };
 
-        // ★★★ 核心修复：强制覆盖危险配置 ★★★
-        if (options.enableCustomAST) {
-            console.log(">>> [安全策略] 检测到自定义AST，强制关闭 Simplify 以防止代码还原");
-            finalConfig.simplify = false; // 必须关闭！否则 String.fromCharCode 会被还原成字符串
+        // 提示信息：如果开启了 Simplify，可能会影响 AST 混淆的效果
+        if (options.enableCustomAST && options.simplify) {
+            console.log(">>> [提示] 检测到 Simplify 开启。如果 vless 等关键词被还原，请在前端关闭 '优化代码结构'。");
         }
 
+        // 移除不属于 javascript-obfuscator 的自定义参数
         delete finalConfig.enableCustomAST;
+        delete finalConfig.astKeywords;
 
-        // --- 3. 针对 Node-Pure (Worker) 的特殊清洗 ---
+        // --- 3. 针对 Node-Pure / Worker 的特殊适配 ---
         if (finalConfig.target === 'node-pure') {
-            console.log(">>> [纯净模式] 优化配置适配 Cloudflare Worker");
+            console.log(">>> [模式] 适配 Cloudflare Worker (Node-Pure)");
             finalConfig.target = 'node'; 
             
-            // Worker 环境建议关闭 StringArray 以减少体积和 CPU 消耗
-            // 但如果你非常在意混淆度，可以在 GUI 开启，这里只做兼容性调整
+            // 强制关闭导致 Worker 超时的选项
             finalConfig.debugProtection = false;
             finalConfig.selfDefending = false;
             finalConfig.splitStrings = false; 
             
-            // 确保不包含浏览器特有的锁定
+            // 清理浏览器相关配置
             finalConfig.domainLock = [];
             delete finalConfig.domainLockRedirectUrl;
             delete finalConfig.debugProtectionInterval;
@@ -116,15 +125,17 @@ ipcMain.handle('perform-obfuscate', async (event, { type, content, options }) =>
             delete finalConfig.debugProtectionInterval;
         }
         else {
+            // browser 模式
             if (!finalConfig.domainLockRedirectUrl) delete finalConfig.domainLockRedirectUrl;
         }
 
-        // --- 4. 执行通用混淆 ---
+        // --- 4. 执行通用混淆 (Phase 2) ---
         console.log(">>> [Phase 2] 执行通用混淆...");
         const obfuscationResult = JavaScriptObfuscator.obfuscate(code, finalConfig);
         let obfuscatedCode = obfuscationResult.getObfuscatedCode();
 
-        // --- 5. 注入补丁 ---
+        // --- 5. 注入 Cloudflare Worker 兼容补丁 ---
+        // 解决 window/document 未定义的问题
         const cfWorkerPatch = `var window = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : {}));
 var document = typeof document !== "undefined" ? document : { createElement: function(){ return { appendChild: function(){}, getContext: function(){} } } };
 `;
