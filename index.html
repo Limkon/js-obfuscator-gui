@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JS 专业代码混淆器 Pro</title>
+    <title>JS 专业代码混淆器 Pro (v9.0)</title>
     <style>
         :root { --primary: #8ccf98; --primary-dark: #6eb57a; --bg: #ffffff; --border: #e1e4e8; --text: #555; --text-active: #4a8a56; }
         body { font-family: 'Segoe UI', sans-serif; padding: 20px; background-color: #f9f9f9; color: var(--text); user-select: none; margin: 0; padding-bottom: 50px; }
@@ -52,7 +52,7 @@
         #btn-run:disabled { background: #ddd; cursor: not-allowed; }
         #status-msg { margin-left: 15px; font-size: 13px; color: #666; font-weight: bold; }
 
-        /* --- 新增：体积统计样式 --- */
+        /* --- 体积统计样式 --- */
         #size-stats { margin-left: auto; font-size: 12px; color: #888; font-family: 'Segoe UI', sans-serif; background: #f5f5f5; padding: 4px 10px; border-radius: 4px; border: 1px solid #eee; display: none; }
         #size-stats span.highlight { color: #333; font-weight: bold; }
         #size-stats span.diff-up { color: #d9534f; }
@@ -174,17 +174,26 @@
 
         <div class="panel">
             <h3>基础设置</h3>
-            <div class="form-item" style="color: #2c7c38; font-weight: bold; border-bottom: 1px dashed #ddd; padding-bottom: 5px; margin-bottom: 8px;">
+            <div class="form-item" style="color: #2c7c38; font-weight: bold; border-bottom: 1px dashed #e1e4e8; padding-bottom: 5px; margin-bottom: 8px;">
                 <input type="checkbox" id="enableCustomAST">
                 <label for="enableCustomAST">启用自定义 AST 规则 (独有混淆)</label>
             </div>
             
+            <div class="form-item sub-item" id="astKeywordArea" style="display:none; margin-left: 0; padding: 5px; background: #f0f7f1; border-radius: 4px;">
+                <div class="help-text" style="color:#2c7c38;">AST 敏感词 (逗号分隔, 强制加密):</div>
+                <textarea id="astKeywords" class="config-text" placeholder="vless, uuid, password, ip"></textarea>
+            </div>
+
+            <div class="form-item" style="background: #fff8dc; padding: 2px; border-radius: 3px;">
+                <input type="checkbox" id="simplify" checked>
+                <label for="simplify" title="如果 AST 混淆失效，请尝试关闭此选项">优化代码结构 (Simplify)</label>
+            </div>
+
             <div class="form-item"><input type="checkbox" id="compact" checked><label for="compact">紧凑代码 (Compact)</label></div>
             <div class="form-item"><input type="checkbox" id="selfDefending"><label for="selfDefending">自我保护 (防格式化)</label></div>
             <div class="form-item"><input type="checkbox" id="debugProtection"><label for="debugProtection">禁止控制台调试</label></div>
             <div class="form-item"><input type="checkbox" id="disableConsoleOutput"><label for="disableConsoleOutput">禁止Console输出</label></div>
             <div class="form-item"><input type="checkbox" id="numbersToExpressions"><label for="numbersToExpressions">数值转表达式</label></div>
-            <div class="form-item"><input type="checkbox" id="simplify" checked><label for="simplify">优化代码结构</label></div>
             <div class="form-item"><input type="checkbox" id="splitStrings"><label for="splitStrings">分割字符串</label></div>
             <div class="form-item"><input type="checkbox" id="unicodeEscapeSequence"><label for="unicodeEscapeSequence">Unicode 转义</label></div>
             <div class="form-item"><input type="checkbox" id="renameGlobals"><label for="renameGlobals">重命名全局变量</label></div>
