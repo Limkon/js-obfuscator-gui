@@ -1,128 +1,135 @@
 /**
- * custom-ast.js (v3.0 Worker 专用稳定版)
- * 优化：防超时设计、保护 fetch 入口、针对性加密 VLESS/UUID
+ * custom-ast.js (v4.0 精准平衡版)
+ * 目标：中文必混淆、VLESS必隐藏、Worker不超时
  */
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generator = require('@babel/generator').default;
 const t = require('@babel/types');
 
-// --- 配置区域 ---
-const CONFIG = {
-    // 关键：Worker 入口和常用对象属性白名单，绝对不能加密！
-    // 加密这些会导致运行时找不到入口或原型链断裂
-    reservedKeys: [
-        'fetch', 'scheduled', 'addEventListener', 'handle', 
-        'request', 'env', 'ctx', 'waitUntil', 'passThroughOnException',
-        'headers', 'method', 'url', 'body', 'cf', 'redirect',
-        'window', 'document', 'self', 'globalThis',
-        'length', 'toString', 'substring', 'indexOf', 'push', 'join' 
-    ],
-    
-    // 强制加密的敏感关键词 (即使在白名单也强制加密，优先级更高)
-    forceEncrypt: ['VLESS', 'VMESS', 'TROJAN', 'UUID', 'uuid', 'port', 'address', 'host'],
+// --- 必杀名单：这些键名必须加密 (不区分大小写) ---
+const SENSITIVE_KEYS = [
+    'vless', 'vmess', 'trojan', 'shadowsocks', 'ss',
+    'uuid', 'password', 'ps', 'remark', 'remarks', 'name',
+    'address', 'host', 'port', 'sni', 'server', 'ip',
+    'alterid', 'security', 'type', 'network', 'grpc', 'ws'
+];
 
-    prefix: '_0xW' // W 代表 Worker 专用前缀
-};
+// --- 保护名单：这些绝对不能动 (防止 Worker 挂掉) ---
+const PROTECTED_KEYS = [
+    'fetch', 'scheduled', 'addEventListener', 'handle',
+    'env', 'ctx', 'request', 'response', 'headers', 
+    'method', 'url', 'cf', 'body', 'redirect', 'status',
+    'window', 'document', 'self', 'globalThis',
+    'prototype', 'toString', 'length', 'substring', 'indexOf'
+];
 
-// 混合加密 (性能优化版)
+// 混合加密函数：中文用 Unicode，英文用 Hex
 function encryptString(str) {
     if (!str) return str;
     let result = '';
-    // 为了性能，仅对非 ASCII 字符或敏感词进行重度 Unicode 加密
-    // 普通字符使用较短的十六进制，减少体积
+    let hasNonAscii = false;
+
     for (let i = 0; i < str.length; i++) {
         const code = str.charCodeAt(i);
-        if (code < 128) {
-            result += '\\x' + code.toString(16).padStart(2, '0');
-        } else {
+        if (code > 127) {
+            hasNonAscii = true;
             result += '\\u' + code.toString(16).padStart(4, '0');
+        } else {
+            result += '\\x' + code.toString(16).padStart(2, '0');
         }
     }
     return result;
 }
 
-// 简单的标识符混淆
-function generateWorkerName(index) {
-    return CONFIG.prefix + index.toString(36); 
+// 判断是否包含中文字符 (或其他非 ASCII 字符)
+function hasChineseOrSpecial(str) {
+    // 只要有字符编码 > 127 (非标准ASCII)，就视为包含特殊字符/中文
+    for (let i = 0; i < str.length; i++) {
+        if (str.charCodeAt(i) > 127) return true;
+    }
+    return false;
 }
 
 function applyCustomRules(code) {
     if (!code || typeof code !== 'string') return code;
 
     try {
-        console.log(">>> [v3.0] 正在应用 Worker 专用 AST 规则...");
+        console.log(">>> [v4.0] 正在执行精准混淆 (VLESS隐藏 + 中文强制加密)...");
         const ast = parser.parse(code, {
             sourceType: 'module',
             plugins: ['jsx', 'typescript', 'classProperties']
         });
 
-        let idCounter = 0;
-
         traverse(ast, {
-            // [规则1]: 变量名/函数名重命名
-            Scope(path) {
-                const bindings = path.scope.bindings;
-                Object.keys(bindings).forEach(oldName => {
-                    // 跳过特定的全局变量名，虽然 Babel 只有局部作用域，但为了保险
-                    if (oldName === 'fetch' || oldName === 'addEventListener') return;
-                    
-                    const newName = generateWorkerName(idCounter++);
-                    try { path.scope.rename(oldName, newName); } catch (e) {}
-                });
-            },
-
-            // [规则2]: 智能对象键名加密
+            // [规则1]: 对象键名精准打击
             ObjectProperty(path) {
                 const keyNode = path.node.key;
-                if (!t.isIdentifier(keyNode) && !t.isStringLiteral(keyNode)) return;
+                let keyName = '';
 
-                const keyName = t.isIdentifier(keyNode) ? keyNode.name : keyNode.value;
-                
-                // 策略：如果是白名单里的词，绝对不碰
-                if (CONFIG.reservedKeys.includes(keyName) && !CONFIG.forceEncrypt.includes(keyName)) {
-                    return; 
+                // 获取键名
+                if (t.isIdentifier(keyNode)) keyName = keyNode.name;
+                else if (t.isStringLiteral(keyNode)) keyName = keyNode.value;
+                else return;
+
+                const lowerKey = keyName.toLowerCase();
+
+                // 1. 如果在保护名单，绝对不动
+                if (PROTECTED_KEYS.includes(keyName)) return;
+
+                // 2. 判定是否需要加密
+                // 条件A: 在敏感词名单里 (VLESS, UUID 等)
+                // 条件B: 包含中文
+                const isSensitive = SENSITIVE_KEYS.some(k => lowerKey === k) || 
+                                    SENSITIVE_KEYS.some(k => lowerKey.includes(k)); // 模糊匹配，如 "vless_server"
+                const isChinese = hasChineseOrSpecial(keyName);
+
+                if (isSensitive || isChinese) {
+                    // 强制转为 StringLiteral 并加密
+                    path.node.key = t.stringLiteral(keyName);
+                    path.node.key.extra = {
+                        rawValue: keyName,
+                        raw: '"' + encryptString(keyName) + '"'
+                    };
                 }
-
-                // 只有看起来像是敏感配置，或者不在白名单里的，才加密
-                // 这样能保留 fetch: function() {...} 的原样，防止 CF 报错
-                
-                // 转换为字符串节点
-                path.node.key = t.stringLiteral(keyName);
-                
-                // 执行加密
-                const encrypted = encryptString(keyName);
-                path.node.key.extra = {
-                    rawValue: keyName,
-                    raw: '"' + encrypted + '"'
-                };
             },
 
-            // [规则3]: 字符串加密
+            // [规则2]: 字符串全量扫描
             StringLiteral(path) {
                 const val = path.node.value;
-                if (!val || val.length < 2) return; // 跳过极短字符串，节省性能
+                if (!val) return;
 
-                // 跳过 import 语句
-                if (path.parentPath.isImportDeclaration()) return;
-                // 跳过对象键名 (规则2已处理)
+                // 跳过 import 语句 (import '...' from '...')
+                if (path.parentPath.isImportDeclaration() || path.parentPath.isExportDeclaration()) return;
+                
+                // 跳过作为对象键名的情况 (已经在规则1处理过了，或者是保护名单里的键)
                 if (path.parentPath.isObjectProperty() && path.key === 'key') return;
 
-                // 防止重复
-                if (path.node.extra && path.node.extra.raw && path.node.extra.raw.startsWith('\\')) return;
+                // 核心判断逻辑
+                const isChinese = hasChineseOrSpecial(val);
+                const isSensitive = SENSITIVE_KEYS.some(k => val.toLowerCase().includes(k)); // 内容包含 VLESS 等
 
-                const encrypted = encryptString(val);
-                path.node.extra = {
-                    rawValue: val,
-                    raw: '"' + encrypted + '"'
-                };
+                // 策略：
+                // 1. 如果包含中文 -> 100% 加密
+                // 2. 如果包含敏感词 -> 100% 加密
+                // 3. 普通短字符串(长度<4) -> 不加密 (节省性能)
+                // 4. 普通长字符串 -> 加密
+                
+                if (isChinese || isSensitive || val.length > 3) {
+                    // 防止重复处理
+                    if (path.node.extra && path.node.extra.raw && path.node.extra.raw.startsWith('\\')) return;
+
+                    path.node.extra = {
+                        rawValue: val,
+                        raw: '"' + encryptString(val) + '"'
+                    };
+                }
             }
         });
 
-        // 生成代码: 启用 compact 模式减少体积
         const output = generator(ast, {
             minified: true,
-            compact: true, 
+            compact: true,
             comments: false,
             jsonCompatibleStrings: false 
         });
@@ -130,7 +137,7 @@ function applyCustomRules(code) {
         return output.code;
 
     } catch (error) {
-        console.error("Worker AST 规则失败:", error);
+        console.error("v4.0 混淆规则出错:", error);
         return code;
     }
 }
