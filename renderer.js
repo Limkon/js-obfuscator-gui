@@ -4,8 +4,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentMode = 'paste'; 
     let selectedFilePath = null;
 
-    // --- DOM ---
+    // --- DOM 元素获取辅助函数 ---
     const get = (id) => document.getElementById(id);
+    
+    // 获取常用元素
     const consoleContainer = get('console-container');
     const tabItemPaste = get('tab-item-paste');
     const tabItemFile = get('tab-item-file');
@@ -15,16 +17,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const contentResult = get('tab-result');
     const sizeStats = get('size-stats'); 
 
+    // --- 新增功能：AST 关键词区域联动 ---
+    // 当勾选“启用自定义 AST”时，显示关键词输入框
+    const checkAst = get('enableCustomAST');
+    const areaAst = get('astKeywordArea');
+    if (checkAst && areaAst) {
+        checkAst.addEventListener('change', (e) => {
+            areaAst.style.display = e.target.checked ? 'block' : 'none';
+        });
+    }
+
     // --- 右键菜单支持 ---
-    const codeAreas = document.querySelectorAll('.code-area');
-    codeAreas.forEach(area => {
+    document.querySelectorAll('.code-area').forEach(area => {
         area.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             window.electronAPI.showContextMenu();
         });
     });
 
-    // --- 工具函数：格式化字节 ---
+    // --- 工具函数：格式化文件体积 ---
     function formatBytes(bytes, decimals = 2) {
         if (!+bytes) return '0 Bytes';
         const k = 1024;
@@ -34,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
     }
 
-    // --- 日志函数 ---
+    // --- 工具函数：日志输出 ---
     function log(msg, type = 'info') {
         const time = new Date().toLocaleTimeString();
         const el = document.createElement('div');
@@ -44,12 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
         consoleContainer.scrollTop = consoleContainer.scrollHeight;
     }
 
-    // --- 复制日志功能 ---
+    // --- 按钮事件：复制日志 ---
     const btnCopyLog = get('btn-copy-log');
     if (btnCopyLog) {
         btnCopyLog.addEventListener('click', () => {
-            const text = consoleContainer.innerText;
-            navigator.clipboard.writeText(text).then(() => {
+            navigator.clipboard.writeText(consoleContainer.innerText).then(() => {
                 const originalText = btnCopyLog.innerText;
                 btnCopyLog.innerText = "已复制!";
                 setTimeout(() => btnCopyLog.innerText = originalText, 1000);
@@ -60,21 +70,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 清空代码按钮 ---
+    // --- 按钮事件：清空代码 ---
     const btnClearCode = get('btn-clear-code');
     if (btnClearCode) {
         btnClearCode.addEventListener('click', () => {
-            const rawCodeInput = get('rawCodeInput');
-            if (rawCodeInput) {
-                rawCodeInput.value = '';
-                rawCodeInput.focus();
+            const rawInput = get('rawCodeInput');
+            if(rawInput) {
+                rawInput.value = '';
+                rawInput.focus();
                 log("操作：已清空源码输入区", "info");
                 if(sizeStats) sizeStats.style.display = 'none';
             }
         });
     }
 
-    // --- 复制结果按钮 ---
+    // --- 按钮事件：复制结果 ---
     const btnCopyResult = get('btn-copy-result');
     if (btnCopyResult) {
         btnCopyResult.addEventListener('click', () => {
@@ -98,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 切换逻辑 ---
+    // --- Tab 切换逻辑 ---
     function setMode(mode) {
         document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -137,15 +147,145 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 预设联动逻辑 ---
+    // --- 核心功能：运行混淆 ---
+    const btnRun = get('btn-run');
+    btnRun.addEventListener('click', async () => {
+        const statusMsg = get('status-msg');
+        const rawCodeInput = get('rawCodeInput');
+        
+        // 重置体积统计显示
+        if(sizeStats) sizeStats.style.display = 'none';
+
+        // 1. 准备源码数据
+        let payloadContent = null;
+        if (currentMode === 'paste') {
+            payloadContent = rawCodeInput.value;
+            if (!payloadContent.trim()) {
+                statusMsg.innerText = "错误：粘贴框为空！";
+                log("错误：尝试混淆但代码为空", "error");
+                return;
+            }
+        } else {
+            payloadContent = selectedFilePath;
+            if (!payloadContent) {
+                statusMsg.innerText = "错误：未选择任何文件！";
+                log("错误：尝试混淆但未选择文件", "error");
+                return;
+            }
+        }
+
+        // 2. 锁定 UI
+        btnRun.disabled = true;
+        btnRun.innerText = "正在处理...";
+        statusMsg.innerText = "";
+        consoleContainer.innerHTML = ""; // 清空日志
+        log(">>> 开始混淆流程...");
+
+        // 3. 收集配置参数
+        const getCheck = (id) => get(id) ? get(id).checked : false;
+        const getVal = (id) => get(id) ? get(id).value : '';
+        const getRadio = (name) => {
+            const el = document.querySelector(`input[name="${name}"]:checked`);
+            return el ? el.value : null;
+        };
+
+        // [核心修改] 收集 AST 关键词
+        const astKeywordsRaw = getVal('astKeywords');
+        // 支持逗号、中文逗号、换行符分隔
+        const astKeywords = astKeywordsRaw.split(/[,，\n]+/).map(s => s.trim()).filter(s => s);
+
+        const options = {
+            target: getRadio('target') || 'browser',
+            
+            // [新增] 传递自定义 AST 参数
+            enableCustomAST: getCheck('enableCustomAST'),
+            astKeywords: astKeywords,
+            simplify: getCheck('simplify'), // 传递用户界面的 Simplify 状态
+
+            compact: getCheck('compact'),
+            selfDefending: getCheck('selfDefending'),
+            debugProtection: getCheck('debugProtection'),
+            disableConsoleOutput: getCheck('disableConsoleOutput'),
+            numbersToExpressions: getCheck('numbersToExpressions'),
+            simplify: getCheck('simplify'), // 冗余保留，确保兼容
+            splitStrings: getCheck('splitStrings'),
+            unicodeEscapeSequence: getCheck('unicodeEscapeSequence'),
+            renameGlobals: getCheck('renameGlobals'),
+            deadCodeInjection: getCheck('deadCodeInjection'),
+            deadCodeInjectionThreshold: parseFloat(getVal('deadCodeInjectionThreshold') || 0.4),
+            controlFlowFlattening: getCheck('controlFlowFlattening'),
+            controlFlowFlatteningThreshold: parseFloat(getVal('controlFlowFlatteningThreshold') || 0.75),
+            identifierNamesGenerator: getVal('identifierNamesGenerator') || 'hexadecimal',
+            domainLock: getVal('domainLock').split('\n').filter(l => l.trim()),
+            domainLockRedirectUrl: getVal('domainLockRedirectUrl').trim(),
+            reservedStrings: getVal('reservedStrings').split('\n').filter(l => l.trim()),
+            reservedNames: getVal('reservedNames').split('\n').filter(l => l.trim())
+        };
+
+        // 打印调试信息
+        log(`配置确认: 自定义AST [${options.enableCustomAST ? '开启' : '关闭'}] | Simplify [${options.simplify ? '开启' : '关闭'}]`);
+        if(options.enableCustomAST && astKeywords.length > 0) {
+            log(`AST 敏感词库: ${astKeywords.join(', ')}`);
+        }
+
+        try {
+            // 4. 发送请求给后端
+            const result = await window.electronAPI.obfuscate({
+                type: currentMode, 
+                content: payloadContent, 
+                options: options
+            });
+
+            if (result.success) {
+                statusMsg.innerText = "混淆成功！";
+                statusMsg.style.color = "green";
+                log("后端返回：混淆成功！", "success");
+                
+                // 更新体积统计
+                if (result.stats && sizeStats) {
+                    const { originalSize, obfuscatedSize } = result.stats;
+                    const diff = obfuscatedSize - originalSize;
+                    const diffClass = diff >= 0 ? 'diff-up' : 'diff-down';
+                    const diffSign = diff >= 0 ? '+' : '';
+                    
+                    sizeStats.innerHTML = `
+                        原始: <span class="highlight">${formatBytes(originalSize)}</span> 
+                        → 混淆后: <span class="highlight">${formatBytes(obfuscatedSize)}</span> 
+                        (<span class="${diffClass}">${diffSign}${formatBytes(diff)}</span>)
+                    `;
+                    sizeStats.style.display = 'inline-block';
+                }
+
+                if (result.finalConfig) {
+                   // log("最终配置: " + JSON.stringify(result.finalConfig, null, 2));
+                }
+
+                get('resultOutput').value = result.code || `文件已保存至: ${result.path}`;
+                setMode('result'); 
+            } else {
+                throw new Error(result.message);
+            }
+
+        } catch (err) {
+            console.error(err);
+            statusMsg.innerText = "失败: " + err.message;
+            statusMsg.style.color = "red";
+            log("后端返回错误: " + err.message, "error");
+        } finally {
+            btnRun.disabled = false;
+            btnRun.innerText = "混淆加密";
+        }
+    });
+
+    // --- 预设联动逻辑 (可选) ---
     function applyPreset(preset) {
         const setCheck = (id, val) => { if(get(id)) get(id).checked = val; };
         const setVal = (id, val) => { if(get(id)) get(id).value = val; };
 
-        // 注意：预设不应覆盖 enableCustomAST 的状态，保持用户手动选择
+        // 仅在明确切换预设时调整基础参数，尽量不干扰用户刚刚设置的 simplify
         if (preset === 'minimal') {
             setCheck('compact', true);
-            setCheck('simplify', true);
+            setCheck('simplify', true); // 极简模式通常需要 simplify
             setCheck('selfDefending', false);
             setCheck('debugProtection', false);
             setCheck('disableConsoleOutput', false);
@@ -156,7 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setCheck('controlFlowFlattening', false);
             setCheck('renameGlobals', false);
             setVal('identifierNamesGenerator', 'mangled');
-            log(">>> 已应用：极简模式 (体积最小化配置)", "info");
+            log(">>> 已应用：极简模式", "info");
         } 
         else if (preset === 'high') {
             setCheck('controlFlowFlattening', true);
@@ -178,135 +318,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.querySelectorAll('input[name="preset"]').forEach(radio => {
         radio.addEventListener('change', (e) => applyPreset(e.target.value));
-    });
-
-    // --- 运行混淆 ---
-    const btnRun = get('btn-run');
-    btnRun.addEventListener('click', async () => {
-        const statusMsg = get('status-msg');
-        const rawCodeInput = get('rawCodeInput');
-        
-        // 重置显示
-        if(sizeStats) sizeStats.style.display = 'none';
-
-        // 1. 准备数据
-        let payloadContent = null;
-        let payloadType = currentMode;
-
-        if (currentMode === 'paste') {
-            payloadContent = rawCodeInput.value;
-            if (!payloadContent.trim()) {
-                statusMsg.innerText = "错误：粘贴框为空！";
-                log("错误：尝试混淆但代码为空", "error");
-                return;
-            }
-        } else if (currentMode === 'file') {
-            payloadContent = selectedFilePath;
-            if (!payloadContent) {
-                statusMsg.innerText = "错误：未选择任何文件！";
-                log("错误：尝试混淆但未选择文件", "error");
-                return;
-            }
-        }
-
-        // 2. 锁定 UI
-        btnRun.disabled = true;
-        btnRun.innerText = "正在处理...";
-        statusMsg.innerText = "";
-        consoleContainer.innerHTML = ""; // 清空日志
-        log(">>> 开始混淆流程...");
-
-        // 3. 收集配置
-        const getCheck = (id) => get(id) ? get(id).checked : false;
-        const getVal = (id) => get(id) ? get(id).value : '';
-        const getRadio = (name) => {
-            const el = document.querySelector(`input[name="${name}"]:checked`);
-            return el ? el.value : null;
-        };
-
-        const targetEnv = getRadio('target') || 'browser';
-        log(`当前选择的运行环境 (Target): ${targetEnv}`);
-
-        const options = {
-            target: targetEnv,
-            // [新增] 读取自定义 AST 开关状态
-            enableCustomAST: getCheck('enableCustomAST'),
-
-            compact: getCheck('compact'),
-            selfDefending: getCheck('selfDefending'),
-            debugProtection: getCheck('debugProtection'),
-            disableConsoleOutput: getCheck('disableConsoleOutput'),
-            numbersToExpressions: getCheck('numbersToExpressions'),
-            simplify: getCheck('simplify'),
-            splitStrings: getCheck('splitStrings'),
-            unicodeEscapeSequence: getCheck('unicodeEscapeSequence'),
-            renameGlobals: getCheck('renameGlobals'),
-            deadCodeInjection: getCheck('deadCodeInjection'),
-            deadCodeInjectionThreshold: parseFloat(getVal('deadCodeInjectionThreshold') || 0.4),
-            controlFlowFlattening: getCheck('controlFlowFlattening'),
-            controlFlowFlatteningThreshold: parseFloat(getVal('controlFlowFlatteningThreshold') || 0.75),
-            identifierNamesGenerator: getVal('identifierNamesGenerator') || 'hexadecimal',
-            domainLock: getVal('domainLock').split('\n').filter(l => l.trim()),
-            domainLockRedirectUrl: getVal('domainLockRedirectUrl').trim(),
-            reservedStrings: getVal('reservedStrings').split('\n').filter(l => l.trim()),
-            reservedNames: getVal('reservedNames').split('\n').filter(l => l.trim())
-        };
-
-        log("发送给后端的配置参数:\n" + JSON.stringify(options, null, 2));
-
-        try {
-            // 4. 发送请求
-            const payload = {
-                type: payloadType, 
-                content: payloadContent, 
-                options: options
-            };
-
-            const result = await window.electronAPI.obfuscate(payload);
-
-            if (result.success) {
-                statusMsg.innerText = "混淆成功！";
-                statusMsg.style.color = "green";
-                log("后端返回：混淆成功！", "info");
-                
-                // --- 更新体积统计 ---
-                if (result.stats && sizeStats) {
-                    const { originalSize, obfuscatedSize } = result.stats;
-                    const diff = obfuscatedSize - originalSize;
-                    const diffClass = diff >= 0 ? 'diff-up' : 'diff-down';
-                    const diffSign = diff >= 0 ? '+' : '';
-                    
-                    sizeStats.innerHTML = `
-                        原始: <span class="highlight">${formatBytes(originalSize)}</span> 
-                        → 混淆后: <span class="highlight">${formatBytes(obfuscatedSize)}</span> 
-                        (<span class="${diffClass}">${diffSign}${formatBytes(diff)}</span>)
-                    `;
-                    sizeStats.style.display = 'inline-block';
-                    log(`体积统计: ${formatBytes(originalSize)} -> ${formatBytes(obfuscatedSize)}`, "info");
-                }
-
-                if (result.finalConfig) {
-                   log("后端实际使用的最终配置 (Final Config):\n" + JSON.stringify(result.finalConfig, null, 2));
-                }
-
-                get('resultOutput').value = result.code || `文件已保存至: ${result.path}`;
-                setMode('result'); 
-            } else {
-                throw new Error(result.message);
-            }
-        } catch (err) {
-            console.error(err);
-            statusMsg.innerText = "失败: " + err.message;
-            statusMsg.style.color = "red";
-            log("后端返回错误: " + err.message, "error");
-        } finally {
-            btnRun.disabled = false;
-            btnRun.innerText = "混淆加密";
-        }
-    });
-
-    // 初始化联动
-    document.querySelectorAll('input[name="preset"]').forEach(radio => {
-        if(radio.checked) applyPreset(radio.value);
     });
 });
