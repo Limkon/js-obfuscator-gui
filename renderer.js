@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const contentResult = get('tab-result');
     const sizeStats = get('size-stats'); 
 
-    // --- 新增：右键菜单支持 ---
+    // --- 右键菜单支持 ---
     const codeAreas = document.querySelectorAll('.code-area');
     codeAreas.forEach(area => {
         area.addEventListener('contextmenu', (e) => {
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 新增功能：清空代码按钮 ---
+    // --- 清空代码按钮 ---
     const btnClearCode = get('btn-clear-code');
     if (btnClearCode) {
         btnClearCode.addEventListener('click', () => {
@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- 新增功能：复制结果按钮 ---
+    // --- 复制结果按钮 ---
     const btnCopyResult = get('btn-copy-result');
     if (btnCopyResult) {
         btnCopyResult.addEventListener('click', () => {
@@ -142,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const setCheck = (id, val) => { if(get(id)) get(id).checked = val; };
         const setVal = (id, val) => { if(get(id)) get(id).value = val; };
 
+        // 注意：预设不应覆盖 enableCustomAST 的状态，保持用户手动选择
         if (preset === 'minimal') {
             setCheck('compact', true);
             setCheck('simplify', true);
@@ -228,6 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const options = {
             target: targetEnv,
+            // [新增] 读取自定义 AST 开关状态
+            enableCustomAST: getCheck('enableCustomAST'),
+
             compact: getCheck('compact'),
             selfDefending: getCheck('selfDefending'),
             debugProtection: getCheck('debugProtection'),
