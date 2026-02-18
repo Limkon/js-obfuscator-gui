@@ -20,7 +20,8 @@
       "renderer.js",
       "index.html",
       "icon.ico",
-      "package.json"
+      "package.json",
+      "custom-ast.js"
     ],
     "win": {
       "target": "portable",
@@ -35,6 +36,10 @@
     "electron-builder": "latest"
   },
   "dependencies": {
-    "javascript-obfuscator": "^4.1.0"
+    "javascript-obfuscator": "^4.1.0",
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/generator": "^7.23.0",
+    "@babel/types": "^7.23.0"
   }
 }
