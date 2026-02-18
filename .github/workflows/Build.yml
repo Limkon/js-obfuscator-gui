@@ -1,5 +1,6 @@
 name: Build Windows Exe
 
+# 仅手动触发
 on:
   workflow_dispatch:
 
@@ -19,7 +20,7 @@ jobs:
         with:
           node-version: 18
 
-      # 这里的 Cache key 改一下，强制刷新缓存
+      # 缓存 node_modules (Key 增加 -v2 以强制刷新缓存)
       - name: Cache node_modules
         id: cache-node
         uses: actions/cache@v3
@@ -27,7 +28,7 @@ jobs:
           path: node_modules
           key: ${{ runner.os }}-node-v2-${{ hashFiles('package.json') }}
 
-      # 【核心修复 1】删除 lock 文件再安装，防止协议冲突
+      # 【核心修复】强制删除 lock 文件，防止 git/ssh 协议报错
       - name: Install Dependencies
         if: steps.cache-node.outputs.cache-hit != 'true'
         run: |
@@ -50,25 +51,28 @@ jobs:
         with:
           node-version: 18
 
-      # 对应上面的 key，加了 -v2
+      # 恢复上个阶段的依赖 (Key 必须与上面一致)
       - name: Restore node_modules
         uses: actions/cache@v3
         with:
           path: node_modules
           key: ${{ runner.os }}-node-v2-${{ hashFiles('package.json') }}
 
-      # 【核心修复 2】这里也强制删除 lock 文件，确保重构原生依赖时不出错
+      # 【核心修复】再次确保无 lock 文件干扰
       - name: Rebuild Native Deps
         run: |
           if (Test-Path package-lock.json) { Remove-Item package-lock.json }
           npm install
 
+      # 执行构建
+      # 1. 注入 GITHUB_TOKEN 防止 electron-builder 报错
+      # 2. 添加 --publish never 跳过发布步骤
       - name: Run Build
-        # 增加 GH_TOKEN 环境变量，防止 electron-builder 发布检查报错
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist -- --publish never
 
+      # 上传构建好的 exe 文件
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
