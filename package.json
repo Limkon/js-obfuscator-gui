@@ -37,6 +37,10 @@
   },
   "dependencies": {
     "javascript-obfuscator": "^4.1.0",
-    "terser": "^5.19.0" 
+    "terser": "^5.19.2",
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/generator": "^7.23.0",
+    "@babel/types": "^7.23.0"
   }
 }
