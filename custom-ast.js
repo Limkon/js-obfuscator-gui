@@ -1,92 +1,227 @@
 /**
- * custom-ast.js (全量加密壳版)
- * 策略：将源码整体加密为字符串，运行时动态解密执行 (eval/Function)
- * 效果：源码中彻底找不到任何关键字，只有密文。
+ * custom-ast.js (v14.0 外科手术式 XOR 版)
+ * 特点：
+ * 1. 体积极小：只对敏感词做 Hex+XOR 处理，不膨胀代码。
+ * 2. 彻底隐藏：自定义解密函数，混淆器无法还原。
+ * 3. 变量重命名：物理消除 vless 变量名。
  */
-const Terser = require('terser');
+const parser = require('@babel/parser');
+const traverse = require('@babel/traverse').default;
+const generator = require('@babel/generator').default;
+const t = require('@babel/types');
 
-// 简单的 XOR 加密算法 (轻量、混淆后难以识别)
-function xorEncrypt(text, key) {
-    let result = '';
-    for (let i = 0; i < text.length; i++) {
-        result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+// --- 配置区域 ---
+const CONFIG = {
+    // 敏感词库
+    SENSITIVE_WORDS: [
+        'vless', 'vmess', 'trojan', 'shadowsocks', 'ss',
+        'uuid', 'password', 'ps', 'remark', 'address', 'host', 'port', 
+        'sni', 'server', 'ip', 'alterid', 'security', 'network', 'grpc', 'ws',
+        'path', 'servicename', 'mode', 'cdn', 'allowinsecure', 'flow', 'level',
+        'fingerprint', 'server_name', 'public_key', 'short_id', 'type', 'alpn'
+    ],
+    // 保护名单
+    PROTECTED_KEYS: [
+        'fetch', 'scheduled', 'addEventListener', 'handle',
+        'env', 'ctx', 'request', 'response', 'headers', 
+        'method', 'url', 'cf', 'body', 'redirect', 'status', 'ok',
+        'window', 'document', 'self', 'globalThis', 'console',
+        'prototype', 'toString', 'length', 'substring', 'indexOf', 'split', 'join',
+        'exports', 'require', 'module', 'import', 'then', 'catch', 'finally',
+        'process', 'Buffer', 'map', 'forEach', 'filter', 'push', 'pop'
+    ],
+    // 解密函数名 (随机短名称，节省体积)
+    DECODER_NAME: '_' + Math.random().toString(36).substring(2, 5),
+    // 简单的 XOR 密钥 (单字符即可，节省体积)
+    XOR_KEY: Math.floor(Math.random() * 9) + 1 // 1-9 之间的数字
+};
+
+// 1. XOR 加密逻辑 (编译时运行)
+function xorEncrypt(str) {
+    let hex = '';
+    for (let i = 0; i < str.length; i++) {
+        // 异或运算
+        let code = str.charCodeAt(i) ^ CONFIG.XOR_KEY;
+        hex += code.toString(16).padStart(2, '0');
     }
-    // 转为 Base64 防止字符集问题
-    return Buffer.from(result).toString('base64');
+    return hex;
 }
 
-// 生成随机密钥
-function generateKey(length) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
+// 2. 构造解密函数 AST (注入到代码头部)
+// function _rx(h) { var s=''; for(var i=0;i<h.length;i+=2) s+=String.fromCharCode(parseInt(h.substr(i,2),16)^KEY); return s; }
+function createDecoderFunction() {
+    const hexParam = t.identifier('h');
+    const strVar = t.identifier('s');
+    const loopVar = t.identifier('i');
+    
+    return t.functionDeclaration(
+        t.identifier(CONFIG.DECODER_NAME),
+        [hexParam],
+        t.blockStatement([
+            t.variableDeclaration('var', [t.variableDeclarator(strVar, t.stringLiteral(''))]),
+            t.forStatement(
+                t.variableDeclaration('var', [t.variableDeclarator(loopVar, t.numericLiteral(0))]),
+                t.binaryExpression('<', loopVar, t.memberExpression(hexParam, t.identifier('length'))),
+                t.assignmentExpression('+=', loopVar, t.numericLiteral(2)),
+                t.blockStatement([
+                    t.expressionStatement(
+                        t.assignmentExpression('+=', strVar,
+                            t.callExpression(
+                                t.memberExpression(t.identifier('String'), t.identifier('fromCharCode')),
+                                [
+                                    t.binaryExpression('^', 
+                                        t.callExpression(t.identifier('parseInt'), [
+                                            t.callExpression(t.memberExpression(hexParam, t.identifier('substr')), [loopVar, t.numericLiteral(2)]),
+                                            t.numericLiteral(16)
+                                        ]),
+                                        t.numericLiteral(CONFIG.XOR_KEY)
+                                    )
+                                ]
+                            )
+                        )
+                    )
+                ])
+            ),
+            t.returnStatement(strVar)
+        ])
+    );
 }
 
-/**
- * @param {string} code 源代码
- * @param {object} options 配置
- */
+// 3. 生成调用节点: _rx("加密的Hex")
+function createDecoderCall(originalStr) {
+    const encrypted = xorEncrypt(originalStr);
+    return t.callExpression(
+        t.identifier(CONFIG.DECODER_NAME),
+        [t.stringLiteral(encrypted)]
+    );
+}
+
+// 生成随机变量名
+function generateRandomName() {
+    return '_' + Math.random().toString(36).substring(2, 6);
+}
+
 function applyCustomRules(code, options = {}) {
     if (!code || typeof code !== 'string') return code;
 
-    console.log(">>> [Packer] 正在执行全量代码加密壳模式...");
-
     try {
-        // 1. 先进行极度压缩 (去掉空格、换行、注释)
-        // 这一步是为了让 vless 等关键字跟周围代码挤在一起，且减小体积
-        let minified = code;
-        try {
-            // 尝试使用 terser 压缩，如果失败则降级使用原代码
-            const minifyResult = require('terser').minify(code, {
-                compress: { passes: 2 },
-                mangle: false // 不重命名，防止破坏 Worker 某些特定变量
-            });
-            if (minifyResult.code) minified = minifyResult.code;
-        } catch (e) {
-            console.warn("压缩失败，将使用未压缩代码加密:", e.message);
+        console.log(`>>> [v14.0] 启动轻量级混淆: XOR[Key=${CONFIG.XOR_KEY}] + 变量清洗`);
+
+        // 合并用户关键词
+        let activeSensitiveWords = [...CONFIG.SENSITIVE_WORDS];
+        if (options.sensitiveWords && Array.isArray(options.sensitiveWords)) {
+            const userWords = options.sensitiveWords
+                .map(w => w.toLowerCase().trim())
+                .filter(w => w.length > 0);
+            if (userWords.length > 0) activeSensitiveWords = [...new Set([...activeSensitiveWords, ...userWords])];
         }
 
-        // 2. 生成随机密钥
-        const key = generateKey(10 + Math.floor(Math.random() * 10));
+        const ast = parser.parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript', 'classProperties'] });
 
-        // 3. 加密源代码
-        const encryptedCode = xorEncrypt(minified, key);
+        const isSensitive = (name) => {
+            if (!name || typeof name !== 'string') return false;
+            if (CONFIG.PROTECTED_KEYS.includes(name)) return false;
+            const lower = name.toLowerCase();
+            return activeSensitiveWords.some(w => lower.includes(w)) || /[\u4e00-\u9fa5]/.test(name);
+        };
 
-        // 4. 生成加载器代码 (Loader)
-        // 这段代码负责在运行时解密并运行
-        // 注意：我们使用 new Function 而不是 eval，兼容性更好
-        const loaderCode = `
-(function(c, k) {
-    var b = function(s) {
-        // Base64 Decode (兼容 Node 和 Browser)
-        if (typeof Buffer !== 'undefined') return Buffer.from(s, 'base64').toString('binary');
-        else return atob(s);
-    };
-    var x = function(t, k) {
-        var r = '';
-        var d = b(t);
-        for (var i = 0; i < d.length; i++) {
-            r += String.fromCharCode(d.charCodeAt(i) ^ k.charCodeAt(i % k.length));
-        }
-        return r;
-    };
-    var s = x(c, k);
-    // 核心：动态执行
-    // 这里的 console.log 是为了证明它跑起来了，生产环境可以去掉
-    var f = new Function(s);
-    return f();
-})("${encryptedCode}", "${key}");
-        `;
+        let hasInjected = false;
 
-        console.log(`>>> [Packer] 加密完成。原始大小: ${code.length}, 加密后 payload: ${encryptedCode.length}`);
-        
-        return loaderCode;
+        // --- Phase 1: 变量物理重命名 (解决 vless 变量残留) ---
+        traverse(ast, {
+            Scope(path) {
+                for (const oldName in path.scope.bindings) {
+                    if (isSensitive(oldName)) {
+                        const newName = generateRandomName();
+                        try { path.scope.rename(oldName, newName); } catch (e) {}
+                    }
+                }
+            },
+            // 处理 import { vless } 别名
+            ImportSpecifier(path) {
+                const localName = path.node.local.name;
+                const importedName = t.isIdentifier(path.node.imported) ? path.node.imported.name : path.node.imported.value;
+                if (isSensitive(localName) && localName === importedName) {
+                    const newName = generateRandomName();
+                    path.scope.rename(localName, newName);
+                }
+            }
+        });
+
+        // --- Phase 2: 字符串与属性加密 (解决关键字残留) ---
+        traverse(ast, {
+            // 1. 对象/类属性
+            "ObjectProperty|ClassProperty"(path) {
+                const keyNode = path.node.key;
+                let keyName = '';
+                if (t.isIdentifier(keyNode) && !path.node.computed) keyName = keyNode.name;
+                else if (t.isStringLiteral(keyNode)) keyName = keyNode.value;
+                else return;
+
+                if (isSensitive(keyName)) {
+                    // [关键] 修复简写属性 { vless } -> { vless: vless }
+                    if (path.node.shorthand) {
+                        path.node.shorthand = false;
+                        path.node.value = t.identifier(keyName); 
+                    }
+                    path.node.computed = true;
+                    path.node.key = createDecoderCall(keyName);
+                }
+            },
+            // 2. 属性访问 obj.vless
+            "MemberExpression|OptionalMemberExpression"(path) {
+                if (!path.node.computed && t.isIdentifier(path.node.property)) {
+                    const propName = path.node.property.name;
+                    if (isSensitive(propName)) {
+                        path.node.computed = true;
+                        path.node.property = createDecoderCall(propName);
+                    }
+                }
+            },
+            // 3. 字符串值
+            StringLiteral(path) {
+                const val = path.node.value;
+                if (!val || val.length < 2) return;
+                if (path.parentPath.isImportDeclaration() || path.parentPath.isExportDeclaration()) return;
+                if ((path.parentPath.isObjectProperty() || path.parentPath.isClassProperty()) && path.key === 'key') return;
+
+                if (isSensitive(val)) {
+                    path.replaceWith(createDecoderCall(val));
+                    path.skip();
+                }
+            },
+            // 4. 方法名
+            "ObjectMethod|ClassMethod"(path) {
+                const keyNode = path.node.key;
+                if (t.isIdentifier(keyNode) && !path.node.computed) {
+                    if (isSensitive(keyNode.name)) {
+                        path.node.computed = true;
+                        path.node.key = createDecoderCall(keyNode.name);
+                    }
+                }
+            },
+            // 5. 注入解密函数
+            Program: {
+                exit(path) {
+                    if (!hasInjected) {
+                        path.node.body.unshift(createDecoderFunction());
+                        hasInjected = true;
+                    }
+                }
+            }
+        });
+
+        const output = generator(ast, {
+            minified: true, 
+            compact: true, 
+            comments: false,
+            jsonCompatibleStrings: false 
+        });
+
+        return output.code;
 
     } catch (error) {
-        console.error("Packer 致命错误:", error);
+        console.error("AST 引擎错误:", error);
         return code;
     }
 }
